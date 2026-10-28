@@ -56,8 +56,14 @@ export interface JobState {
   error?: string
 }
 
-export interface AppConfig {
+export interface VersionInfo {
   version: string
+  commit: string
+  build_time: string
+}
+
+export interface AppConfig {
+  version: VersionInfo
   roots: string[]
   default_source: string
   default_targets: string[]
@@ -82,4 +88,42 @@ export interface ScanRequest {
   recursive: boolean
   min_size_mb: number
   dup_mode: DupMode
+}
+
+export interface UpdateProgress {
+  percent: number
+  current: number
+  total: number
+  layers: number
+  done: number
+}
+
+export interface UpdateState {
+  running: boolean
+  phase?: 'prepare' | 'pull' | 'recreate' | 'restarting'
+  progress?: UpdateProgress
+  fromVersion?: string
+  startedAt?: string
+  finishedAt?: string
+  success: boolean | null
+  message?: string
+  log?: string
+}
+
+export interface AutoUpdate {
+  enabled: boolean
+  time: string
+  next?: string
+}
+
+export interface UpdateStatus {
+  current: VersionInfo
+  latest: string
+  latestError?: string
+  imageChanged: boolean | null
+  imageError?: string
+  hasUpdate: boolean
+  autoUpdate: AutoUpdate
+  docker: { available: boolean; reason: string; name?: string; image?: string }
+  state: UpdateState
 }

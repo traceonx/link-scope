@@ -1,0 +1,20 @@
+# 本地构建并运行：在项目根目录执行 docker compose up -d --build，然后打开 http://localhost:8082
+# 正式部署请用 deploy/docker-compose.yml（直接拉取 Docker Hub 镜像）。
+services:
+  app:
+    image: link-scope:local
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    container_name: link-scope
+    environment:
+      TZ: Asia/Shanghai
+      LS_ROOTS: ${LS_ROOTS:-/vol1}
+      LS_DEFAULT_SOURCE: ${LS_DEFAULT_SOURCE:-}
+      LS_DEFAULT_TARGETS: ${LS_DEFAULT_TARGETS:-}
+    ports:
+      - "${WEB_PORT:-8082}:8090"
+    volumes:
+      - ./data:/app/data
+      - ${LS_MOUNT:-/vol1}:${LS_MOUNT:-/vol1}:ro
+    restart: unless-stopped

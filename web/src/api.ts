@@ -1,4 +1,16 @@
-import type { AppConfig, BrowseResult, Filter, JobState, ResultPage, ScanRequest, Summary } from './types'
+import type {
+  AppConfig,
+  AutoUpdate,
+  BrowseResult,
+  Filter,
+  JobState,
+  ResultPage,
+  ScanRequest,
+  Summary,
+  UpdateState,
+  UpdateStatus,
+  VersionInfo,
+} from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -19,7 +31,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  health: () => request<VersionInfo & { status: string }>('api/health'),
   config: () => request<AppConfig>('api/config'),
+  updateStatus: () => request<UpdateStatus>('api/update'),
+  startUpdate: () => request<UpdateState>('api/update', { method: 'POST' }),
+  setAutoUpdate: (enabled: boolean, time: string) =>
+    request<AutoUpdate>('api/update/auto', { method: 'PUT', body: JSON.stringify({ enabled, time }) }),
   browse: (path = '') => request<BrowseResult>(`api/browse?path=${encodeURIComponent(path)}`),
   scan: (body: ScanRequest) => request<{ ok: boolean }>('api/scan', { method: 'POST', body: JSON.stringify(body) }),
   cancel: () => request<{ ok: boolean }>('api/scan/cancel', { method: 'POST' }),

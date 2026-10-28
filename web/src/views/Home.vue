@@ -5,9 +5,10 @@ import Icon from '../components/Icon.vue'
 import FolderPicker from '../components/FolderPicker.vue'
 import ResultTable from '../components/ResultTable.vue'
 import DetailPanel from '../components/DetailPanel.vue'
+import UpdateModal from '../components/UpdateModal.vue'
 import { api } from '../api'
 import { fmtCount, fmtSize, fmtTime } from '../format'
-import type { AppConfig, DupMode, Filter, Item, JobState, Summary } from '../types'
+import type { AppConfig, DupMode, Filter, Item, JobState, Summary, UpdateStatus } from '../types'
 
 const message = useMessage()
 
@@ -208,6 +209,17 @@ function removeTarget(t: string) {
 }
 
 const exportUrl = computed(() => api.exportUrl(filter.value, q.value))
+
+// ---- 版本与更新 ----
+const showUpdate = ref(false)
+const hasUpdate = ref(false)
+function onUpdateStatus(s: UpdateStatus) {
+  hasUpdate.value = s.hasUpdate
+}
+onMounted(() => {
+  // 后台检查一次是否有新版本，只用于在版本号旁显示提示点
+  api.updateStatus().then(onUpdateStatus).catch(() => undefined)
+})
 </script>
 
 <template>
@@ -218,7 +230,10 @@ const exportUrl = computed(() => api.exportUrl(filter.value, q.value))
         <span class="brand-name">LinkScope <span class="brand-cn">链接透视</span></span>
         <span class="brand-sub">硬链接 · 重复文件 · 软链接 · STRM</span>
       </div>
-      <span v-if="cfg" class="version muted">v{{ cfg.version }}</span>
+      <button v-if="cfg" type="button" class="version" :title="`提交 ${cfg.version.commit}`" @click="showUpdate = true">
+        v{{ cfg.version.version }}
+        <span v-if="hasUpdate" class="update-dot" aria-label="有新版本" />
+      </button>
     </div>
   </header>
 
@@ -394,6 +409,8 @@ const exportUrl = computed(() => api.exportUrl(filter.value, q.value))
     </div>
   </main>
 
+  <UpdateModal v-model:show="showUpdate" @status="onUpdateStatus" />
+
   <FolderPicker
     v-model:show="picker.show"
     :title="picker.mode === 'source' ? '选择要检测的文件夹' : '添加查找目录'"
@@ -413,7 +430,13 @@ const exportUrl = computed(() => api.exportUrl(filter.value, q.value))
 .brand-name { font-size: 17px; font-weight: 700; }
 .brand-cn { font-weight: 500; color: var(--ink-2); margin-left: 4px; }
 .brand-sub { font-size: 12px; color: var(--ink-2); }
-.version { font-size: 12px; }
+.version {
+  position: relative; height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border);
+  background: transparent; color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer;
+}
+.version:hover { border-color: var(--border-strong); color: var(--ink); }
+.version:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.update-dot { position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--orange); border: 2px solid var(--surface); }
 
 .main { display: flex; flex-direction: column; gap: 16px; padding-top: 20px; padding-bottom: 32px; }
 

@@ -19,23 +19,29 @@ import (
 	"github.com/traceonx/link-scope/internal/config"
 	"github.com/traceonx/link-scope/internal/jobs"
 	"github.com/traceonx/link-scope/internal/scanner"
+	"github.com/traceonx/link-scope/internal/update"
+	"github.com/traceonx/link-scope/internal/version"
 )
 
 type Server struct {
 	cfg     *config.Config
 	jobs    *jobs.Manager
+	updater *update.Manager
 	web     fs.FS
-	version string
 }
 
-func New(cfg *config.Config, jm *jobs.Manager, web fs.FS, version string) *Server {
-	return &Server{cfg: cfg, jobs: jm, web: web, version: version}
+func New(cfg *config.Config, jm *jobs.Manager, um *update.Manager, web fs.FS) *Server {
+	return &Server{cfg: cfg, jobs: jm, updater: um, web: web}
 }
 
 // Handler 返回完整的 HTTP 处理器。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/config", s.getConfig)
+	mux.HandleFunc("GET /api/update", s.updateStatus)
+	mux.HandleFunc("POST /api/update", s.startUpdate)
+	mux.HandleFunc("PUT /api/update/auto", s.setAutoUpdate)
 	mux.HandleFunc("GET /api/browse", s.browse)
 	mux.HandleFunc("POST /api/scan", s.startScan)
 	mux.HandleFunc("POST /api/scan/cancel", s.cancelScan)
@@ -105,9 +111,48 @@ func sendErr(w http.ResponseWriter, err error) {
 
 // ---- 接口 ----
 
+func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
+	v := version.Get()
+	writeJSON(w, 200, map[string]any{"status": "ok", "version": v.Version, "commit": v.Commit, "build_time": v.BuildTime})
+}
+
+func (s *Server) updateStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, s.updater.Status(r.Context()))
+}
+
+func (s *Server) startUpdate(w http.ResponseWriter, r *http.Request) {
+	st, err := s.updater.Start(r.Context())
+	if errors.Is(err, update.ErrBusy) {
+		fail(w, 409, err.Error())
+		return
+	}
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, st)
+}
+
+func (s *Server) setAutoUpdate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool   `json:"enabled"`
+		Time    string `json:"time"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		fail(w, 400, "请求格式错误")
+		return
+	}
+	a, err := s.updater.SetAuto(req.Enabled, req.Time)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, a)
+}
+
 func (s *Server) getConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, map[string]any{
-		"version":         s.version,
+		"version":         version.Get(),
 		"roots":           nonNil(s.cfg.Roots),
 		"default_source":  s.cfg.DefaultSource,
 		"default_targets": nonNil(s.cfg.DefaultTargets),
@@ -367,6 +412,10 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/health" { // 供 Docker 健康检查使用
+			next.ServeHTTP(w, r)
+			return
+		}
 		u, p, ok := r.BasicAuth()
 		if !ok || subtle.ConstantTimeCompare([]byte(u), []byte(s.cfg.AuthUser)) != 1 ||
 			subtle.ConstantTimeCompare([]byte(p), []byte(s.cfg.AuthPass)) != 1 {

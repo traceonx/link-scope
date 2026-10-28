@@ -13,6 +13,7 @@ import (
 
 	"github.com/traceonx/link-scope/internal/config"
 	"github.com/traceonx/link-scope/internal/jobs"
+	"github.com/traceonx/link-scope/internal/update"
 )
 
 func newTestServer(t *testing.T, mutate func(*config.Config)) (*httptest.Server, string) {
@@ -32,7 +33,9 @@ func newTestServer(t *testing.T, mutate func(*config.Config)) (*httptest.Server,
 		mutate(cfg)
 	}
 	web := fstest.MapFS{"index.html": {Data: []byte("<html>app</html>")}}
-	ts := httptest.NewServer(New(cfg, jobs.New(cfg.DataDir), web, "test").Handler())
+	t.Setenv("UPDATE_DOCKER_SOCKET", filepath.Join(root, "none.sock"))
+	t.Setenv("UPDATE_HUB_API", "http://127.0.0.1:1") // 测试不访问外网
+	ts := httptest.NewServer(New(cfg, jobs.New(cfg.DataDir), update.New(cfg.DataDir), web).Handler())
 	t.Cleanup(ts.Close)
 	return ts, root
 }
@@ -148,6 +151,11 @@ func TestAuthAndSPA(t *testing.T) {
 	if resp.StatusCode != 401 {
 		t.Errorf("未登录应返回 401，实际 %d", resp.StatusCode)
 	}
+	resp, _ = http.Get(ts.URL + "/api/health")
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("健康检查不应需要登录，实际 %d", resp.StatusCode)
+	}
 	req, _ := http.NewRequest("GET", ts.URL+"/some/deep/link", nil)
 	req.SetBasicAuth("u", "p")
 	resp, err := http.DefaultClient.Do(req)
@@ -159,5 +167,31 @@ func TestAuthAndSPA(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != 200 || !strings.Contains(string(buf[:n]), "app") {
 		t.Errorf("前端路由应回落到 index.html: %d %s", resp.StatusCode, buf[:n])
+	}
+}
+
+func TestUpdateEndpoints(t *testing.T) {
+	ts, _ := newTestServer(t, nil)
+	var st struct {
+		Docker struct {
+			Available bool   `json:"available"`
+			Reason    string `json:"reason"`
+		} `json:"docker"`
+	}
+	getJSON(t, ts.URL+"/api/update", &st)
+	if st.Docker.Available || st.Docker.Reason == "" {
+		t.Errorf("没有 socket 时应不可用: %+v", st)
+	}
+	if c := post(t, ts.URL+"/api/update", ""); c != 400 {
+		t.Errorf("不可用时一键更新应返回 400，实际 %d", c)
+	}
+	req, _ := http.NewRequest("PUT", ts.URL+"/api/update/auto", strings.NewReader(`{"enabled":true,"time":"04:30"}`))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("保存自动更新应返回 200，实际 %d", resp.StatusCode)
 	}
 }

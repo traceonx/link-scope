@@ -56,7 +56,7 @@ func Load() *Config {
 		Addr:           str("LS_ADDR", ":"+str("LS_PORT", "8090")),
 		DefaultSource:  str("LS_DEFAULT_SOURCE", ""),
 		DefaultTargets: list("LS_DEFAULT_TARGETS", ""),
-		DataDir:        str("LS_DATA_DIR", "./data"),
+		DataDir:        str("LS_DATA_DIR", str("DATA_DIR", "./data")),
 		AuthUser:       os.Getenv("LS_AUTH_USER"),
 		AuthPass:       os.Getenv("LS_AUTH_PASS"),
 		Workers:        num("LS_WORKERS", min(16, max(4, runtime.NumCPU()*2))),
