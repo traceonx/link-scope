@@ -1,0 +1,30 @@
+# 飞牛 fnOS 示例：把整个存储空间 /vol1 以相同路径只读挂载进容器。
+# 重要：源目录和媒体库必须在同一个挂载点下（例如都在 /vol1），
+# 分开挂载会被系统视为不同设备，无法正确识别硬链接。
+services:
+  linkscope:
+    image: ghcr.io/traceonx/link-scope:latest
+    # 本地构建：取消下一行注释，然后 docker compose up -d --build
+    # build: .
+    container_name: linkscope
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      - TZ=Asia/Singapore
+      # 只允许扫描这些目录（逗号分隔）
+      - LS_ROOTS=/vol1
+      # 打开页面时默认填入的路径
+      - LS_DEFAULT_SOURCE=/vol1/1000/Downloads
+      - LS_DEFAULT_TARGETS=/vol1/1000/Media
+      # 可选：登录保护
+      # - LS_AUTH_USER=admin
+      # - LS_AUTH_PASS=change-me
+      # 可选：并发数（机械硬盘可调小，SSD 可调大）
+      # - LS_WORKERS=8
+      # - LS_HASH_WORKERS=2
+    volumes:
+      - ./config:/config
+      - /vol1:/vol1:ro
+    # 如遇到"没有权限读取"，可改为以文件所属用户运行（用 id 命令查看实际的 uid:gid）
+    # user: "1000:1000"

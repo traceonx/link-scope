@@ -1,4 +1,16 @@
-__pycache__/
-*.pyc
-.venv/
+# Go
+/linkscope
+/bin/
+/data/
+*.test
+
+# 前端
+web/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+
+# 其他
 *.csv
+.env
+.DS_Store
+__pycache__/
