@@ -2,11 +2,17 @@ import type {
   AppConfig,
   AutoUpdate,
   BrowseResult,
+  DeletePreview,
+  DeleteResult,
+  DeleteTarget,
+  Downloader,
   Filter,
   JobState,
   ResultPage,
   ScanRequest,
   Summary,
+  TorrentSummary,
+  TrashEntry,
   UpdateState,
   UpdateStatus,
   VersionInfo,
@@ -41,9 +47,30 @@ export const api = {
   scan: (body: ScanRequest) => request<{ ok: boolean }>('api/scan', { method: 'POST', body: JSON.stringify(body) }),
   cancel: () => request<{ ok: boolean }>('api/scan/cancel', { method: 'POST' }),
   status: () => request<{ state: JobState; summary: Summary | null }>('api/status'),
-  result: (filter: Filter, q: string, offset: number, limit: number) =>
+  result: (filter: Filter, site: string, q: string, offset: number, limit: number) =>
     request<ResultPage>(
-      `api/result?filter=${filter}&q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}`,
+      `api/result?filter=${filter}&site=${encodeURIComponent(site)}&q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}`,
     ),
-  exportUrl: (filter: Filter, q: string) => `api/export.csv?filter=${filter}&q=${encodeURIComponent(q)}`,
+  exportUrl: (filter: Filter, site: string, q: string) =>
+    `api/export.csv?filter=${filter}&site=${encodeURIComponent(site)}&q=${encodeURIComponent(q)}`,
+
+  deletePreview: (t: DeleteTarget) =>
+    request<DeletePreview>('api/delete/preview', { method: 'POST', body: JSON.stringify(t) }),
+  deletePaths: (t: DeleteTarget, permanent: boolean) =>
+    request<DeleteResult>('api/delete', { method: 'POST', body: JSON.stringify({ ...t, permanent }) }),
+  trash: () => request<{ items: TrashEntry[]; days: number }>('api/trash'),
+  trashRestore: (ids: string[]) =>
+    request<{ restored: number; results: { path: string; ok: boolean; error?: string }[] }>('api/trash/restore', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }),
+  trashPurge: (ids: string[], all = false) =>
+    request<{ results: unknown[] }>('api/trash/purge', { method: 'POST', body: JSON.stringify({ ids, all }) }),
+
+  downloaders: () => request<Downloader[]>('api/downloaders'),
+  saveDownloader: (d: Downloader) => request<Downloader>('api/downloaders', { method: 'POST', body: JSON.stringify(d) }),
+  testDownloader: (d: Downloader) =>
+    request<{ torrents: number }>('api/downloaders/test', { method: 'POST', body: JSON.stringify(d) }),
+  deleteDownloader: (id: string) => request<{ ok: boolean }>(`api/downloaders/${id}`, { method: 'DELETE' }),
+  refreshTorrents: () => request<TorrentSummary>('api/torrents/refresh', { method: 'POST' }),
 }

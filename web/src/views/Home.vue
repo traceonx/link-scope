@@ -6,9 +6,12 @@ import FolderPicker from '../components/FolderPicker.vue'
 import ResultTable from '../components/ResultTable.vue'
 import DetailPanel from '../components/DetailPanel.vue'
 import UpdateModal from '../components/UpdateModal.vue'
+import DeleteDialog from '../components/DeleteDialog.vue'
+import TrashModal from '../components/TrashModal.vue'
+import DownloaderModal from '../components/DownloaderModal.vue'
 import { api } from '../api'
 import { fmtCount, fmtSize, fmtTime } from '../format'
-import type { AppConfig, DupMode, Filter, Item, JobState, Summary, UpdateStatus } from '../types'
+import type { AppConfig, DeleteResult, DeleteTarget, DupMode, Filter, Item, JobState, Summary, UpdateStatus } from '../types'
 
 const message = useMessage()
 
@@ -30,10 +33,24 @@ const dupOptions = [
 // ---- 任务与结果 ----
 const job = ref<JobState>({ status: 'idle', done: 0, total: 0 })
 const summary = ref<Summary | null>(null)
-const emptyCounts: Record<Filter, number> = { all: 0, linked: 0, unlinked: 0, dup: 0, symlink: 0, strm: 0, broken: 0 }
+const emptyCounts: Record<Filter, number> = {
+  all: 0,
+  linked: 0,
+  unlinked: 0,
+  dup: 0,
+  symlink: 0,
+  strm: 0,
+  broken: 0,
+  torrent: 0,
+  seeding: 0,
+  unregistered: 0,
+  orphan: 0,
+}
 const counts = ref<Record<Filter, number>>({ ...emptyCounts })
 const filter = ref<Filter>('all')
 const q = ref('')
+const site = ref('')
+const checked = ref<string[]>([])
 const page = ref(1)
 const pageSize = ref(50)
 const items = ref<Item[]>([])
@@ -44,15 +61,32 @@ const detailEl = ref<HTMLElement | null>(null)
 
 const running = computed(() => job.value.status === 'running')
 
-const filters = computed(() => [
-  { key: 'all' as Filter, label: '全部' },
-  { key: 'linked' as Filter, label: '已链接' },
-  { key: 'unlinked' as Filter, label: '未链接' },
-  { key: 'dup' as Filter, label: '重复副本' },
-  { key: 'symlink' as Filter, label: '软链接' },
-  { key: 'strm' as Filter, label: 'STRM' },
-  { key: 'broken' as Filter, label: '失效' },
+const hasTorrents = computed(() => !!summary.value?.torrents)
+const filters = computed(() => {
+  const list: { key: Filter; label: string }[] = [
+    { key: 'all', label: '全部' },
+    { key: 'linked', label: '已链接' },
+    { key: 'unlinked', label: '未链接' },
+    { key: 'dup', label: '重复副本' },
+    { key: 'symlink', label: '软链接' },
+    { key: 'strm', label: 'STRM' },
+    { key: 'broken', label: '失效' },
+  ]
+  if (hasTorrents.value) {
+    list.push(
+      { key: 'seeding', label: '做种中' },
+      { key: 'unregistered', label: '已删种' },
+      { key: 'orphan', label: '孤儿文件' },
+    )
+  }
+  return list
+})
+const siteOptions = computed(() => [
+  { label: '全部站点', value: '' },
+  ...(summary.value?.torrents?.sites ?? []).map((s) => ({ label: `${s.site}（${s.files}）`, value: s.site })),
 ])
+const canDelete = computed(() => !!cfg.value?.can_delete)
+const failedClients = computed(() => (summary.value?.torrents?.clients ?? []).filter((c) => !c.ok))
 
 const linkedPct = computed(() => {
   const s = summary.value
@@ -62,6 +96,7 @@ const linkedPct = computed(() => {
 const progressText = computed(() => {
   const j = job.value
   if (j.phase === 'dups') return `正在比对重复文件… ${fmtCount(j.done)} / ${fmtCount(j.total)}`
+  if (j.phase === 'torrents') return '正在读取下载器中的种子…'
   if (j.phase === 'targets') return `正在扫描查找目录… 已读取 ${fmtCount(j.done)} 个条目`
   return `正在扫描文件夹… 已读取 ${fmtCount(j.done)} 个条目`
 })
@@ -75,7 +110,7 @@ const progressPct = computed(() => {
 async function loadResult() {
   loading.value = true
   try {
-    const r = await api.result(filter.value, q.value, (page.value - 1) * pageSize.value, pageSize.value)
+    const r = await api.result(filter.value, site.value, q.value, (page.value - 1) * pageSize.value, pageSize.value)
     items.value = r.items
     count.value = r.count
     counts.value = { ...emptyCounts, ...r.counts }
@@ -166,8 +201,9 @@ onMounted(async () => {
 })
 onBeforeUnmount(stopPolling)
 
-watch(filter, () => {
+watch([filter, site], () => {
   page.value = 1
+  checked.value = []
   loadResult()
 })
 watch([page, pageSize], loadResult)
@@ -176,6 +212,7 @@ watch(q, () => {
   if (qTimer) clearTimeout(qTimer)
   qTimer = setTimeout(() => {
     page.value = 1
+    checked.value = []
     loadResult()
   }, 300)
 })
@@ -208,7 +245,50 @@ function removeTarget(t: string) {
   form.targets = form.targets.filter((x) => x !== t)
 }
 
-const exportUrl = computed(() => api.exportUrl(filter.value, q.value))
+const exportUrl = computed(() => api.exportUrl(filter.value, site.value, q.value))
+
+// ---- 删除 ----
+const del = reactive({ show: false, target: null as DeleteTarget | null, title: '' })
+const pickerReload = ref(0)
+function askDelete(target: DeleteTarget, title: string) {
+  if (running.value) {
+    message.warning('扫描进行中，请等扫描结束后再删除')
+    return
+  }
+  Object.assign(del, { show: true, target, title })
+}
+function deletePaths(paths: string[], title = '删除') {
+  askDelete({ paths }, title)
+}
+function deleteChecked() {
+  deletePaths([...checked.value], `删除所选 ${checked.value.length} 项`)
+}
+function deleteAllFiltered() {
+  const f = filters.value.find((x) => x.key === filter.value)?.label ?? '全部'
+  askDelete({ filter: filter.value, site: site.value, q: q.value }, `删除「${f}」中的全部 ${count.value} 项`)
+}
+async function onDeleted(r: DeleteResult) {
+  if (!r.deleted) return
+  checked.value = []
+  pickerReload.value++
+  await loadResult()
+  if (selected.value && !items.value.some((x) => x.path === selected.value?.path)) selected.value = null
+}
+
+// ---- 回收站与下载器 ----
+const showTrash = ref(false)
+const showDownloaders = ref(false)
+const downloaderCount = ref(0)
+onMounted(() => {
+  api
+    .downloaders()
+    .then((l) => (downloaderCount.value = l.filter((d) => d.enabled).length))
+    .catch(() => undefined)
+})
+function siteSize(s: { size: number }) {
+  const max = summary.value?.torrents?.sites[0]?.size || 1
+  return `${Math.max(4, Math.round((s.size / max) * 100))}%`
+}
 
 // ---- 版本与更新 ----
 const showUpdate = ref(false)
@@ -228,8 +308,16 @@ onMounted(() => {
       <div class="logo"><Icon name="link" :size="20" /></div>
       <div class="brand">
         <span class="brand-name">LinkScope <span class="brand-cn">链接透视</span></span>
-        <span class="brand-sub">硬链接 · 重复文件 · 软链接 · STRM</span>
+        <span class="brand-sub">硬链接 · 重复文件 · 软链接 · STRM · 种子</span>
       </div>
+      <NButton quaternary size="small" class="top-btn" @click="showDownloaders = true">
+        <template #icon><Icon name="server" /></template>
+        <span class="top-label">下载器<template v-if="downloaderCount"> {{ downloaderCount }}</template></span>
+      </NButton>
+      <NButton v-if="canDelete" quaternary size="small" class="top-btn" @click="showTrash = true">
+        <template #icon><Icon name="trash" /></template>
+        <span class="top-label">回收站</span>
+      </NButton>
       <button v-if="cfg" type="button" class="version" :title="`提交 ${cfg.version.commit}`" @click="showUpdate = true">
         v{{ cfg.version.version }}
         <span v-if="hasUpdate" class="update-dot" aria-label="有新版本" />
@@ -300,6 +388,16 @@ onMounted(() => {
         <Icon name="alert" :size="18" />
         <div><div v-for="w in summary.warnings" :key="w">{{ w }}</div></div>
       </div>
+      <div v-if="summary?.stale" class="notice notice-info">
+        <Icon name="refresh" :size="18" />
+        <span>扫描后有文件被删除或恢复，统计数字为估算，建议重新扫描。</span>
+      </div>
+      <div v-if="failedClients.length" class="notice notice-err">
+        <Icon name="server" :size="18" />
+        <div>
+          <div v-for="c in failedClients" :key="c.name">下载器「{{ c.name }}」读取失败：{{ c.error }}</div>
+        </div>
+      </div>
       <div v-if="summary?.error_count" class="notice notice-err">
         <Icon name="alert" :size="18" />
         <div>
@@ -369,6 +467,53 @@ onMounted(() => {
       </button>
     </section>
 
+    <!-- 种子 / 站点 -->
+    <section v-if="summary?.torrents" class="card seeds" aria-label="种子与站点">
+      <div class="seeds-stats">
+        <button type="button" class="seed-stat" @click="filter = 'seeding'">
+          <span class="mini-icon green"><Icon name="seed" :size="18" /></span>
+          <span class="mini-body">
+            <span class="mini-label">做种中</span>
+            <span class="mini-val"><b>{{ fmtCount(summary.torrents.seeding) }}</b> 个文件</span>
+          </span>
+        </button>
+        <button type="button" class="seed-stat" @click="filter = 'unregistered'">
+          <span class="mini-icon red"><Icon name="alert" :size="18" /></span>
+          <span class="mini-body">
+            <span class="mini-label">站点已删种</span>
+            <span class="mini-val"><b>{{ fmtCount(summary.torrents.unregistered) }}</b> 个文件</span>
+          </span>
+        </button>
+        <button type="button" class="seed-stat" @click="filter = 'orphan'">
+          <span class="mini-icon orange"><Icon name="file" :size="18" /></span>
+          <span class="mini-body">
+            <span class="mini-label">孤儿文件（不属于任何种子）</span>
+            <span class="mini-val">
+              <b>{{ fmtCount(summary.torrents.orphans) }}</b> 个 · {{ fmtSize(summary.torrents.orphan_size) }}
+            </span>
+          </span>
+        </button>
+        <span class="muted small seeds-time">种子读取于 {{ fmtTime(summary.torrents.fetched_at) }}</span>
+      </div>
+      <div v-if="summary.torrents.sites.length" class="sites">
+        <button
+          v-for="s in summary.torrents.sites.slice(0, 12)"
+          :key="s.site"
+          type="button"
+          class="site"
+          :class="{ on: site === s.site }"
+          :aria-pressed="site === s.site"
+          @click="site = site === s.site ? '' : s.site"
+        >
+          <span class="site-name">{{ s.site }}</span>
+          <span class="site-bar"><span :style="{ width: siteSize(s) }" /></span>
+          <span class="site-meta muted">
+            {{ s.files }} 个 · {{ fmtSize(s.size) }}<template v-if="s.unregistered"> · <span class="c-red">{{ s.unregistered }} 已删种</span></template>
+          </span>
+        </button>
+      </div>
+    </section>
+
     <!-- 列表 + 详情 -->
     <div class="content">
       <section class="card list" aria-label="结果列表">
@@ -383,13 +528,40 @@ onMounted(() => {
             <NInput v-model:value="q" :input-props="{ id: 'q' }" placeholder="搜索文件名或路径" clearable class="search">
               <template #prefix><Icon name="search" /></template>
             </NInput>
+            <NSelect
+              v-if="hasTorrents"
+              v-model:value="site"
+              :options="siteOptions"
+              class="site-select"
+              :consistent-menu-width="false"
+            />
             <NButton tag="a" :href="exportUrl" :disabled="!summary">
               <template #icon><Icon name="download" /></template>
               导出 CSV
             </NButton>
           </div>
         </div>
+        <div v-if="canDelete && (checked.length || (filter !== 'all' && count))" class="bulk">
+          <template v-if="checked.length">
+            <span>已选 {{ checked.length }} 项</span>
+            <NButton size="small" type="error" secondary @click="deleteChecked">
+              <template #icon><Icon name="trash" /></template>
+              删除所选
+            </NButton>
+            <NButton size="small" quaternary @click="checked = []">取消选择</NButton>
+          </template>
+          <template v-else>
+            <span class="muted">当前筛选共 {{ fmtCount(count) }} 项</span>
+            <NButton size="small" type="error" secondary @click="deleteAllFiltered">
+              <template #icon><Icon name="trash" /></template>
+              删除全部筛选结果
+            </NButton>
+          </template>
+        </div>
         <ResultTable
+          v-model:checked="checked"
+          :selectable="canDelete"
+          :show-torrents="hasTorrents"
           :items="items"
           :count="count"
           :page="page"
@@ -404,18 +576,30 @@ onMounted(() => {
       </section>
 
       <div ref="detailEl" class="detail-wrap">
-        <DetailPanel :item="selected" />
+        <DetailPanel :item="selected" :can-delete="canDelete" @delete="deletePaths" />
       </div>
     </div>
   </main>
 
   <UpdateModal v-model:show="showUpdate" @status="onUpdateStatus" />
+  <DeleteDialog v-model:show="del.show" :target="del.target" :title="del.title" @done="onDeleted" />
+  <TrashModal v-model:show="showTrash" @changed="loadResult" />
+  <DownloaderModal
+    v-model:show="showDownloaders"
+    :summary="summary?.torrents"
+    :scanned="!!summary"
+    @refreshed="loadResult"
+    @changed="(n: number) => (downloaderCount = n)"
+  />
 
   <FolderPicker
     v-model:show="picker.show"
     :title="picker.mode === 'source' ? '选择要检测的文件夹' : '添加查找目录'"
     :start="picker.start"
+    :can-delete="canDelete"
+    :reload-key="pickerReload"
     @select="onPicked"
+    @delete="(p: string) => deletePaths([p], '删除文件夹')"
   />
 </template>
 
@@ -430,6 +614,8 @@ onMounted(() => {
 .brand-name { font-size: 17px; font-weight: 700; }
 .brand-cn { font-weight: 500; color: var(--ink-2); margin-left: 4px; }
 .brand-sub { font-size: 12px; color: var(--ink-2); }
+.top-btn { color: var(--ink-2); }
+@media (max-width: 640px) { .top-label { display: none; } }
 .version {
   position: relative; height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border);
   background: transparent; color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer;
@@ -502,6 +688,31 @@ details summary { cursor: pointer; text-decoration: underline; }
 .mini-val { font-size: 14px; }
 .mini-val b { font-size: 16px; }
 
+.seeds { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.seeds-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+.seed-stat { display: flex; align-items: center; gap: 10px; border: 0; background: transparent; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.seed-stat:focus-visible, .site:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.seeds-time { margin-left: auto; }
+.small { font-size: 12px; }
+.mini-icon.green { background: var(--green-bg); color: var(--green-ink); }
+.mini-icon.red { background: var(--red-bg); color: var(--red-ink); }
+.mini-icon.orange { background: var(--orange-bg); color: var(--orange-ink); }
+.sites { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.site {
+  display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.site:hover { border-color: var(--border-strong); }
+.site.on { border-color: var(--blue); background: var(--blue-row); }
+.site-name { font-size: 13px; font-weight: 600; }
+.site-bar { height: 4px; border-radius: 2px; background: var(--chip); overflow: hidden; }
+.site-bar span { display: block; height: 4px; background: var(--green-ink); }
+.site-meta { font-size: 12px; }
+.site-select { width: 180px; }
+.bulk {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 16px;
+  border-bottom: 1px solid var(--border); background: var(--soft); font-size: 13px;
+}
 .content { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
 .list { flex: 999 1 600px; min-width: 0; overflow: hidden; }
 .detail-wrap { flex: 1 1 340px; min-width: 0; scroll-margin-top: 12px; }

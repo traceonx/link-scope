@@ -11,6 +11,11 @@ export const iconPaths = {
   copies: ['M8 4h9a2 2 0 0 1 2 2v9', 'M5 8h9a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z'],
   arrow: ['M5 12h14', 'm13 6 6 6-6 6'],
   file: ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z', 'M14 3v5h5'],
+  trash: ['M4 7h16', 'M10 11v6', 'M14 11v6', 'M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12', 'M9 7V4h6v3'],
+  restore: ['M4 12a8 8 0 1 0 2.3-5.6L4 8.6', 'M4 4v4.6h4.6'],
+  server: ['M5 4h14a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z', 'M5 13h14a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1z', 'M8 7.5h.01', 'M8 16.5h.01'],
+  refresh: ['M20 12a8 8 0 1 1-2.3-5.6L20 8.6', 'M20 4v4.6h-4.6'],
+  seed: ['M12 21V11', 'M12 11c0-4 3-7 8-7 0 5-3 7-8 7z', 'M12 14c0-3-2-5-6-5 0 4 2 5 6 5z'],
 } as const satisfies Record<string, readonly string[]>
 
 export type IconName = keyof typeof iconPaths

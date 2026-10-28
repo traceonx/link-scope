@@ -5,8 +5,12 @@ import Icon from './Icon.vue'
 import { api } from '../api'
 import type { BrowseResult } from '../types'
 
-const props = defineProps<{ show: boolean; title: string; start?: string }>()
-const emit = defineEmits<{ (e: 'update:show', v: boolean): void; (e: 'select', path: string): void }>()
+const props = defineProps<{ show: boolean; title: string; start?: string; canDelete?: boolean; reloadKey?: number }>()
+const emit = defineEmits<{
+  (e: 'update:show', v: boolean): void
+  (e: 'select', path: string): void
+  (e: 'delete', path: string): void
+}>()
 
 const data = ref<BrowseResult>({ path: '', parent: null, dirs: [] })
 const loading = ref(false)
@@ -27,6 +31,14 @@ async function open(path: string) {
     loading.value = false
   }
 }
+
+// 删除文件夹后重新读取当前目录
+watch(
+  () => props.reloadKey,
+  () => {
+    if (props.show) open(data.value.path)
+  },
+)
 
 watch(
   () => props.show,
@@ -67,11 +79,24 @@ function choose() {
       <div v-if="error" class="notice notice-err">{{ error }}</div>
       <NSpin :show="loading">
         <div class="picker-list">
-          <button v-for="d in data.dirs" :key="d.path" type="button" class="picker-item" @click="open(d.path)">
-            <Icon name="folder" />
-            <span class="picker-name">{{ d.name }}</span>
-            <Icon name="chevron" :size="14" />
-          </button>
+          <div v-for="d in data.dirs" :key="d.path" class="picker-row">
+            <button type="button" class="picker-item" @click="open(d.path)">
+              <Icon name="folder" />
+              <span class="picker-name">{{ d.name }}</span>
+              <Icon name="chevron" :size="14" />
+            </button>
+            <NButton
+              v-if="canDelete && data.path"
+              quaternary
+              size="small"
+              type="error"
+              class="picker-del"
+              :aria-label="`删除文件夹 ${d.name}`"
+              @click="emit('delete', d.path)"
+            >
+              <template #icon><Icon name="trash" :size="14" /></template>
+            </NButton>
+          </div>
           <NEmpty v-if="!loading && !data.dirs.length" description="没有子文件夹" style="padding: 32px 0" />
         </div>
       </NSpin>
@@ -90,9 +115,11 @@ function choose() {
 .picker-bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: var(--soft); }
 .picker-path { font-size: 13px; word-break: break-all; }
 .picker-list { height: min(360px, 50vh); overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+.picker-row { display: flex; align-items: center; border-bottom: 1px solid var(--border); }
+.picker-del { margin-right: 6px; }
 .picker-item {
-  width: 100%; display: flex; align-items: center; gap: 10px; padding: 0 12px; min-height: 44px;
-  border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--ink);
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0 12px; min-height: 44px;
+  border: 0; background: transparent; color: var(--ink);
   font: inherit; font-size: 14px; text-align: left; cursor: pointer;
 }
 .picker-item:hover { background: var(--soft); }

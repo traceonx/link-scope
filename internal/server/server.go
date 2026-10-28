@@ -17,8 +17,10 @@ import (
 	"time"
 
 	"github.com/traceonx/link-scope/internal/config"
+	"github.com/traceonx/link-scope/internal/fileops"
 	"github.com/traceonx/link-scope/internal/jobs"
 	"github.com/traceonx/link-scope/internal/scanner"
+	"github.com/traceonx/link-scope/internal/torrents"
 	"github.com/traceonx/link-scope/internal/update"
 	"github.com/traceonx/link-scope/internal/version"
 )
@@ -27,11 +29,13 @@ type Server struct {
 	cfg     *config.Config
 	jobs    *jobs.Manager
 	updater *update.Manager
+	ops     *fileops.Manager
+	dl      *torrents.Store
 	web     fs.FS
 }
 
-func New(cfg *config.Config, jm *jobs.Manager, um *update.Manager, web fs.FS) *Server {
-	return &Server{cfg: cfg, jobs: jm, updater: um, web: web}
+func New(cfg *config.Config, jm *jobs.Manager, um *update.Manager, ops *fileops.Manager, dl *torrents.Store, web fs.FS) *Server {
+	return &Server{cfg: cfg, jobs: jm, updater: um, ops: ops, dl: dl, web: web}
 }
 
 // Handler 返回完整的 HTTP 处理器。
@@ -48,6 +52,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("GET /api/result", s.result)
 	mux.HandleFunc("GET /api/export.csv", s.exportCSV)
+	mux.HandleFunc("POST /api/delete/preview", s.deletePreview)
+	mux.HandleFunc("POST /api/delete", s.deletePaths)
+	mux.HandleFunc("GET /api/trash", s.trashList)
+	mux.HandleFunc("POST /api/trash/restore", s.trashRestore)
+	mux.HandleFunc("POST /api/trash/purge", s.trashPurge)
+	mux.HandleFunc("GET /api/downloaders", s.downloaderList)
+	mux.HandleFunc("POST /api/downloaders", s.downloaderSave)
+	mux.HandleFunc("POST /api/downloaders/test", s.downloaderTest)
+	mux.HandleFunc("DELETE /api/downloaders/{id}", s.downloaderDelete)
+	mux.HandleFunc("POST /api/torrents/refresh", s.torrentsRefresh)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
 	mux.Handle("/", s.spa())
 	return s.auth(mux)
@@ -151,8 +165,13 @@ func (s *Server) setAutoUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getConfig(w http.ResponseWriter, _ *http.Request) {
+	canDel, delReason := s.ops.Capability()
 	writeJSON(w, 200, map[string]any{
 		"version":         version.Get(),
+		"can_delete":      canDel,
+		"delete_reason":   delReason,
+		"trash_days":      s.ops.TrashDays(),
+		"has_downloaders": s.dl.HasAny(),
 		"roots":           nonNil(s.cfg.Roots),
 		"default_source":  s.cfg.DefaultSource,
 		"default_targets": nonNil(s.cfg.DefaultTargets),
@@ -320,7 +339,7 @@ func (s *Server) result(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
-	count, items := s.jobs.Query(filter, q.Get("q"), offset, limit)
+	count, items := s.jobs.Query(filter, q.Get("site"), q.Get("q"), offset, limit)
 	writeJSON(w, 200, map[string]any{
 		"summary": s.jobs.Summary(), "counts": s.jobs.Counts(), "count": count, "items": items,
 	})
@@ -361,13 +380,13 @@ func (s *Server) exportCSV(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "未知的筛选项")
 		return
 	}
-	_, items := s.jobs.Query(filter, r.URL.Query().Get("q"), 0, 0)
+	_, items := s.jobs.Query(filter, r.URL.Query().Get("site"), r.URL.Query().Get("q"), 0, 0)
 	name := time.Now().Format("links_20060102_150405.csv")
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	_, _ = w.Write([]byte("\xEF\xBB\xBF")) // 让 Excel 正确识别 UTF-8
 	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"类型", "状态", "路径", "链接数", "大小(字节)", "修改时间", "硬链接位置", "重复副本", "指向"})
+	_ = cw.Write([]string{"类型", "状态", "路径", "链接数", "大小(字节)", "修改时间", "硬链接位置", "重复副本", "指向", "站点", "种子状态"})
 	for i := range items {
 		it := &items[i]
 		nlink, mtime := "", ""
@@ -379,7 +398,7 @@ func (s *Server) exportCSV(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = cw.Write([]string{
 			typeLabel[it.Type], statusLabel(it), it.Path, nlink, strconv.FormatInt(it.Size, 10), mtime,
-			strings.Join(it.Links, " | "), strings.Join(it.Dups, " | "), it.Target,
+			strings.Join(it.Links, " | "), strings.Join(it.Dups, " | "), it.Target, sitesOf(it), torrentStates(it),
 		})
 	}
 	cw.Flush()
@@ -425,4 +444,236 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+var stateLabel = map[string]string{"seeding": "做种中", "downloading": "下载中", "paused": "已暂停", "checking": "校验中",
+	"queued": "排队中", "error": "出错"}
+
+func sitesOf(it *scanner.Item) string {
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range it.Torrents {
+		if !seen[r.Site] {
+			seen[r.Site] = true
+			out = append(out, r.Site)
+		}
+	}
+	if len(out) == 0 && hasTagStr(it.Tags, "orphan") {
+		return "孤儿文件"
+	}
+	return strings.Join(out, " | ")
+}
+
+func torrentStates(it *scanner.Item) string {
+	var out []string
+	for _, r := range it.Torrents {
+		l := stateLabel[r.State]
+		if r.Unregistered {
+			l = "站点已删种"
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, " | ")
+}
+
+func hasTagStr(tags []string, t string) bool {
+	for _, x := range tags {
+		if x == t {
+			return true
+		}
+	}
+	return false
+}
+
+// ---- 删除与回收站 ----
+
+type deleteRequest struct {
+	Paths     []string `json:"paths"`
+	Filter    string   `json:"filter"` // 与 paths 二选一：删除当前筛选的全部结果
+	Site      string   `json:"site"`
+	Q         string   `json:"q"`
+	Permanent bool     `json:"permanent"`
+}
+
+func (s *Server) deleteTargets(w http.ResponseWriter, r *http.Request) ([]string, *deleteRequest, bool) {
+	var req deleteRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<20)).Decode(&req); err != nil {
+		fail(w, 400, "请求格式错误")
+		return nil, nil, false
+	}
+	paths := req.Paths
+	if len(paths) == 0 && req.Filter != "" {
+		if !validFilter(req.Filter) {
+			fail(w, 400, "未知的筛选项")
+			return nil, nil, false
+		}
+		_, items := s.jobs.Query(req.Filter, req.Site, req.Q, 0, 0)
+		for _, it := range items {
+			paths = append(paths, it.Path)
+		}
+	}
+	if len(paths) == 0 {
+		fail(w, 400, "没有要删除的内容")
+		return nil, nil, false
+	}
+	return paths, &req, true
+}
+
+type seedingInfo struct {
+	Files int      `json:"files"`
+	Sites []string `json:"sites"`
+}
+
+func (s *Server) seeding(paths []string) seedingInfo {
+	var info seedingInfo
+	seen := map[string]bool{}
+	for _, it := range s.jobs.ItemsByPath(paths) {
+		active := false
+		for _, t := range it.Torrents {
+			if t.State == "seeding" || t.State == "downloading" || t.State == "queued" || t.State == "checking" {
+				active = true
+				if !seen[t.Site] {
+					seen[t.Site] = true
+					info.Sites = append(info.Sites, t.Site)
+				}
+			}
+		}
+		if active {
+			info.Files++
+		}
+	}
+	if info.Sites == nil {
+		info.Sites = []string{}
+	}
+	return info
+}
+
+func (s *Server) deletePreview(w http.ResponseWriter, r *http.Request) {
+	paths, _, ok := s.deleteTargets(w, r)
+	if !ok {
+		return
+	}
+	pv, err := s.ops.Preview(paths)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"preview": pv, "seeding": s.seeding(paths), "trash_days": s.ops.TrashDays()})
+}
+
+func (s *Server) deletePaths(w http.ResponseWriter, r *http.Request) {
+	if s.jobs.Running() {
+		fail(w, 409, "扫描进行中，请等扫描结束后再删除")
+		return
+	}
+	paths, req, ok := s.deleteTargets(w, r)
+	if !ok {
+		return
+	}
+	results, done, err := s.ops.Delete(paths, req.Permanent)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	s.jobs.RemovePaths(done)
+	failed := 0
+	var errs []fileops.Result
+	for _, x := range results {
+		if !x.OK {
+			failed++
+			if len(errs) < 50 {
+				errs = append(errs, x)
+			}
+		}
+	}
+	if errs == nil {
+		errs = []fileops.Result{}
+	}
+	writeJSON(w, 200, map[string]any{"deleted": len(done), "failed": failed, "errors": errs})
+}
+
+func (s *Server) trashList(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, 200, map[string]any{"items": s.ops.Trash(), "days": s.ops.TrashDays()})
+}
+
+type idsRequest struct {
+	IDs []string `json:"ids"`
+	All bool     `json:"all"`
+}
+
+func (s *Server) trashRestore(w http.ResponseWriter, r *http.Request) {
+	var req idsRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil || len(req.IDs) == 0 {
+		fail(w, 400, "请求格式错误")
+		return
+	}
+	results, restored := s.ops.Restore(req.IDs)
+	if len(restored) > 0 {
+		s.jobs.MarkStale()
+	}
+	writeJSON(w, 200, map[string]any{"results": results, "restored": len(restored)})
+}
+
+func (s *Server) trashPurge(w http.ResponseWriter, r *http.Request) {
+	var req idsRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil || (!req.All && len(req.IDs) == 0) {
+		fail(w, 400, "请求格式错误")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"results": s.ops.Purge(req.IDs, req.All)})
+}
+
+// ---- 下载器与种子 ----
+
+func (s *Server) downloaderList(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, 200, s.dl.List())
+}
+
+func (s *Server) downloaderSave(w http.ResponseWriter, r *http.Request) {
+	var d torrents.Downloader
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&d); err != nil {
+		fail(w, 400, "请求格式错误")
+		return
+	}
+	saved, err := s.dl.Save(d)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, saved)
+}
+
+func (s *Server) downloaderTest(w http.ResponseWriter, r *http.Request) {
+	var d torrents.Downloader
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&d); err != nil {
+		fail(w, 400, "请求格式错误")
+		return
+	}
+	n, err := s.dl.Test(r.Context(), d)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]int{"torrents": n})
+}
+
+func (s *Server) downloaderDelete(w http.ResponseWriter, r *http.Request) {
+	if err := s.dl.Delete(r.PathValue("id")); err != nil {
+		fail(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (s *Server) torrentsRefresh(w http.ResponseWriter, r *http.Request) {
+	ts, err := s.jobs.RefreshTorrents(r.Context())
+	if errors.Is(err, jobs.ErrBusy) {
+		fail(w, 409, "扫描进行中，结束后会自动检测种子")
+		return
+	}
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, ts)
 }

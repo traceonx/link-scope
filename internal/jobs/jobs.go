@@ -12,10 +12,18 @@ import (
 	"time"
 
 	"github.com/traceonx/link-scope/internal/scanner"
+	"github.com/traceonx/link-scope/internal/torrents"
 )
 
 // Filters 是结果列表支持的筛选项。
-var Filters = []string{"all", "linked", "unlinked", "dup", "symlink", "strm", "broken"}
+var Filters = []string{"all", "linked", "unlinked", "dup", "symlink", "strm", "broken",
+	"torrent", "seeding", "unregistered", "orphan"}
+
+// Fetcher 读取所有下载器的种子；为 nil 或没有下载器时跳过种子检测。
+type Fetcher interface {
+	HasAny() bool
+	Fetch(ctx context.Context) torrents.Snapshot
+}
 
 var ErrBusy = errors.New("已有扫描正在进行")
 
@@ -37,10 +45,11 @@ type Manager struct {
 	counts  map[string]int
 	lower   []string // 每条结果路径的小写形式，用于搜索
 	cancel  context.CancelFunc
+	fetcher Fetcher
 }
 
-func New(dataDir string) *Manager {
-	m := &Manager{dataDir: dataDir, state: State{Status: "idle"}}
+func New(dataDir string, f Fetcher) *Manager {
+	m := &Manager{dataDir: dataDir, state: State{Status: "idle"}, fetcher: f}
 	m.load()
 	return m
 }
@@ -103,6 +112,13 @@ func (m *Manager) Start(o scanner.Options) error {
 	}
 	go func() {
 		r, err := scanner.Scan(ctx, o)
+		if err == nil && m.fetcher != nil && m.fetcher.HasAny() {
+			m.mu.Lock()
+			m.state.Phase, m.state.Done, m.state.Total = "torrents", 0, 0
+			m.mu.Unlock()
+			snap := m.fetcher.Fetch(ctx)
+			annotate(r, &snap)
+		}
 		if err == nil {
 			m.save(r)
 		}
@@ -157,8 +173,8 @@ func (m *Manager) Counts() map[string]int {
 	return out
 }
 
-// Query 按筛选项和关键字过滤，返回总数和分页后的条目。limit<=0 表示不分页。
-func (m *Manager) Query(filter, q string, offset, limit int) (int, []scanner.Item) {
+// Query 按筛选项、站点和关键字过滤，返回总数和分页后的条目。limit<=0 表示不分页。
+func (m *Manager) Query(filter, site, q string, offset, limit int) (int, []scanner.Item) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.result == nil {
@@ -175,12 +191,103 @@ func (m *Manager) Query(filter, q string, offset, limit int) (int, []scanner.Ite
 		if q != "" && !strings.Contains(m.lower[i], q) {
 			continue
 		}
+		if site != "" && !hasSite(it, site) {
+			continue
+		}
 		if count >= offset && (limit <= 0 || len(out) < limit) {
 			out = append(out, *it)
 		}
 		count++
 	}
 	return count, out
+}
+
+// RefreshTorrents 重新读取下载器并更新最近一次扫描结果中的种子信息。
+func (m *Manager) RefreshTorrents(ctx context.Context) (*scanner.TorrentSummary, error) {
+	if m.fetcher == nil || !m.fetcher.HasAny() {
+		return nil, errors.New("还没有添加下载器")
+	}
+	m.mu.RLock()
+	has := m.result != nil
+	running := m.state.Status == "running"
+	m.mu.RUnlock()
+	if running {
+		return nil, ErrBusy
+	}
+	if !has {
+		return nil, errors.New("还没有扫描结果")
+	}
+	snap := m.fetcher.Fetch(ctx)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.result == nil {
+		return nil, errors.New("还没有扫描结果")
+	}
+	annotate(m.result, &snap)
+	m.setResult(m.result)
+	m.save(m.result)
+	return m.result.Summary.Torrents, nil
+}
+
+// Running 是否有扫描正在进行。
+func (m *Manager) Running() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.state.Status == "running"
+}
+
+// ItemsByPath 返回结果中指定路径的条目（用于删除前检查做种情况）。
+func (m *Manager) ItemsByPath(paths []string) []scanner.Item {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.result == nil {
+		return nil
+	}
+	set := map[string]bool{}
+	for _, p := range paths {
+		set[p] = true
+	}
+	var out []scanner.Item
+	for _, it := range m.result.Items {
+		if set[it.Path] || under(it.Path, paths) {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// RemovePaths 从结果中去掉已删除的路径。
+func (m *Manager) RemovePaths(deleted []string) {
+	if len(deleted) == 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.result == nil {
+		return
+	}
+	removePaths(m.result, deleted)
+	m.setResult(m.result)
+	m.save(m.result)
+}
+
+// MarkStale 标记结果需要重新扫描（例如从回收站恢复了文件）。
+func (m *Manager) MarkStale() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.result != nil && !m.result.Summary.Stale {
+		m.result.Summary.Stale = true
+		m.save(m.result)
+	}
+}
+
+func hasSite(it *scanner.Item, site string) bool {
+	for _, r := range it.Torrents {
+		if r.Site == site {
+			return true
+		}
+	}
+	return false
 }
 
 func hasTag(tags []string, t string) bool {

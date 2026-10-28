@@ -66,6 +66,46 @@ type Item struct {
 	Remote   bool     `json:"remote,omitempty"`
 	Broken   bool     `json:"broken"`
 	Tags     []string `json:"tags"`
+	// 种子信息（连接下载器后填充）
+	Torrents []TorrentRef `json:"torrents,omitempty"`
+}
+
+// TorrentRef 表示文件属于下载器中的某个种子。
+type TorrentRef struct {
+	Client       string `json:"client"`
+	Hash         string `json:"hash"`
+	Name         string `json:"name"`
+	Site         string `json:"site"`
+	State        string `json:"state"` // seeding | downloading | paused | checking | queued | error
+	Unregistered bool   `json:"unregistered,omitempty"`
+	Message      string `json:"message,omitempty"`
+}
+
+// TorrentSummary 是种子检测的汇总。
+type TorrentSummary struct {
+	FetchedAt    int64        `json:"fetched_at"`
+	Clients      []ClientStat `json:"clients"`
+	Sites        []SiteStat   `json:"sites"`
+	Matched      int          `json:"matched"` // 属于某个种子的文件数
+	Seeding      int          `json:"seeding"`
+	Unregistered int          `json:"unregistered"`
+	Orphans      int          `json:"orphans"`
+	OrphanSize   int64        `json:"orphan_size"`
+}
+
+type ClientStat struct {
+	Name     string `json:"name"`
+	OK       bool   `json:"ok"`
+	Error    string `json:"error,omitempty"`
+	Torrents int    `json:"torrents"`
+}
+
+type SiteStat struct {
+	Site         string `json:"site"`
+	Files        int    `json:"files"`
+	Size         int64  `json:"size"`
+	Seeding      int    `json:"seeding"`
+	Unregistered int    `json:"unregistered"`
 }
 
 // Summary 扫描汇总。
@@ -92,6 +132,9 @@ type Summary struct {
 	Warnings    []string `json:"warnings"`
 	Errors      []string `json:"errors"`
 	ErrorCount  int      `json:"error_count"`
+	// Stale：扫描后有文件被删除或恢复，统计为估算，建议重新扫描
+	Stale    bool            `json:"stale,omitempty"`
+	Torrents *TorrentSummary `json:"torrents,omitempty"`
 }
 
 // Result 扫描结果。

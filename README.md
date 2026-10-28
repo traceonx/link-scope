@@ -1,6 +1,6 @@
 # LinkScope · 链接透视
 
-运行在 NAS 上的轻量链接检测工具：一眼看清哪些文件已硬链接、链接到了哪里、哪些还没整理、哪些被重复复制占用空间，以及失效的软链接和 STRM。单文件、低内存，Docker 一键部署，为飞牛 fnOS 优化。
+运行在 NAS 上的轻量链接检测工具：一眼看清哪些文件已硬链接、链接到了哪里、哪些还没整理、哪些被重复复制占用空间、失效的软链接和 STRM，以及每个文件的做种状态和来源站点，并可安全地删除清理。单文件、低内存，Docker 一键部署，为飞牛 fnOS 优化。
 
 ## 能检测什么
 
@@ -11,8 +11,32 @@
 | **重复副本** | 内容相同、却是独立文件的副本（整理时被复制而不是硬链接），并统计多占的空间 |
 | **软链接** | 指向哪里；目标已不存在的标为失效 |
 | **STRM** | `.strm` 里写的本地路径是否还存在；远程地址只记录不检测 |
+| **做种 / 站点** | 连接 qBittorrent / Transmission 后：每个文件属于哪个种子、是否在做种、来自哪个站点 |
+| **站点已删种** | Tracker 返回「未注册 / 种子不存在」等错误的种子 |
+| **孤儿文件** | 在下载目录里，但不属于任何种子的文件 |
 
 重复比对有两种方式：**抽样**（默认，只读每个文件的头、中、尾各 1 MB，速度快）和**完整**（读完整个文件，最准确但慢）。只有大小完全相同的文件才会被比对。
+
+## 删除与回收站
+
+详情面板里每个路径都可以单独删除，也可以「删除全部硬链接」或「删除所在文件夹」；列表可勾选批量删除，或删除当前筛选的全部结果；目录浏览里可以删除文件夹。
+
+- **删除前预览**：数量、大小和**实际释放空间**。硬链接要所有路径都删掉才释放空间，只删其中一个路径时会明确提示
+- **做种提醒**：连接了下载器时，若文件仍在做种，会提示来自哪些站点，避免 H&R
+- **回收站**：默认移到所在存储空间根目录的 `.linkscope-trash`（同盘改名，瞬间完成），右上角「回收站」可恢复或清空，`LS_TRASH_DAYS` 天后自动清除；勾选「永久删除」并输入「删除」可直接删除
+- **安全**：只能删除 `LS_ROOTS` 内的内容，不能删除根目录本身；媒体目录只读挂载（`:ro`）或 `LS_DELETE=false` 时不显示删除功能；每次操作记录在 `data/delete.log`
+
+## 站点种子检测
+
+右上角「下载器」中添加 qBittorrent 或 Transmission（可添加多个），填写 WebUI 地址、账号，以及**路径映射**：下载器也运行在 Docker 中时，它看到的保存路径（如 `/downloads`）与本工具中的路径（如 `/vol1/1000/Downloads`）不同，需要映射后才能对上文件。
+
+保存后，每次扫描结束会自动读取种子（也可在「下载器」里手动「重新读取种子」）：
+
+- 列表新增「种子 / 站点」列，可筛选「做种中 / 已删种 / 孤儿文件」，并按站点筛选
+- 统计区显示各站点的文件数与占用空间
+- 扫描媒体库、把下载目录作为查找目录时，也会通过硬链接对应到种子
+
+站点按 Tracker 域名识别，常见 PT 站显示中文名，其余显示主域名。
 
 ## 部署（飞牛 fnOS）
 
@@ -54,6 +78,8 @@ compose 中挂载了 `/var/run/docker.sock` 时，点击页面右上角的版本
 | `PROXY_HOST` | 空 | Docker Hub 版本查询走的代理，如 `http://192.168.5.199:7890` |
 | `UPDATE_HUB_API` | `https://hub.docker.com` | Docker Hub 接口的反向代理地址（国内无法直连时） |
 | `PUID` / `PGID` | 空（root） | 设置后降权运行；默认 root 以便读取所有用户的文件 |
+| `LS_DELETE` | `true` | 设为 `false` 关闭删除功能 |
+| `LS_TRASH_DAYS` | `30` | 回收站保留天数 |
 
 ### 发布新版本
 
@@ -85,6 +111,8 @@ cmd/linkscope/      程序入口
 internal/scanner/   扫描核心（硬链接 / 重复 / 软链接 / STRM）
 internal/jobs/      后台任务与结果持久化
 internal/server/    HTTP 接口（Go 标准库 net/http）
+internal/fileops/   删除与回收站
+internal/torrents/  下载器（qBittorrent / Transmission）与站点识别
 internal/update/    一键更新 / 自动更新（docker.sock + watchtower）
 internal/version/   版本信息（构建时注入）
 internal/config/    环境变量配置
@@ -105,8 +133,12 @@ scripts/            独立的命令行检测脚本（Python，无需部署）
 | POST | `/api/scan` | 开始扫描 `{source, targets, recursive, min_size_mb, dup_mode}` |
 | POST | `/api/scan/cancel` | 取消扫描 |
 | GET | `/api/status` | 进度和上次扫描汇总 |
-| GET | `/api/result?filter=&q=&offset=&limit=` | 分页结果；filter：all / linked / unlinked / dup / symlink / strm / broken |
-| GET | `/api/export.csv?filter=&q=` | 导出 CSV（Excel 可直接打开） |
+| GET | `/api/result?filter=&site=&q=&offset=&limit=` | 分页结果；filter：all / linked / unlinked / dup / symlink / strm / broken / torrent / seeding / unregistered / orphan |
+| GET | `/api/export.csv?filter=&site=&q=` | 导出 CSV（Excel 可直接打开） |
+| POST | `/api/delete/preview`、`/api/delete` | 删除预览 / 删除 `{paths}` 或 `{filter, site, q}`，`permanent` |
+| GET / POST | `/api/trash`、`/api/trash/restore`、`/api/trash/purge` | 回收站列表 / 恢复 / 永久删除 |
+| GET / POST / DELETE | `/api/downloaders`、`/api/downloaders/test`、`/api/downloaders/{id}` | 下载器配置 |
+| POST | `/api/torrents/refresh` | 重新读取种子并更新结果 |
 
 ## 性能
 

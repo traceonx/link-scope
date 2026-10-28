@@ -1,6 +1,7 @@
 # 单容器部署：docker compose up -d，然后打开 http://NAS地址:8082
 # 扫描结果、更新记录都在同级目录 ./data，备份或迁移时复制这个目录即可
 # 页面右上角版本号 → 「版本与更新」可一键更新 / 设置自动更新，需要挂载 docker.sock；不需要可删掉那一行
+# 右上角「下载器」添加 qBittorrent / Transmission 后，可检测做种、站点、已删种和孤儿文件
 #
 # 重要：硬链接只存在于同一个存储空间内。请把整个存储空间（如 /vol1）以相同路径挂载，
 # 不要把下载目录和媒体库分成两个挂载点，否则容器内会被当成不同设备，硬链接识别会出错。
@@ -14,6 +15,8 @@ services:
       LS_ROOTS: /vol1                     # 只允许扫描这些目录，逗号分隔，如 /vol1,/vol2
       LS_DEFAULT_SOURCE: /vol1/1000/Downloads
       LS_DEFAULT_TARGETS: /vol1/1000/Media
+      # LS_TRASH_DAYS: "30"                    # 回收站保留天数
+      # LS_DELETE: "false"                      # 关闭删除功能（或把下面的 /vol1 挂载改回 :ro）
       # PROXY_HOST: http://192.168.5.199:7890   # 可选：Docker Hub 版本查询走代理
       # LS_AUTH_USER: admin                     # 可选：登录保护（两项都填才生效）
       # LS_AUTH_PASS: change-me
@@ -23,7 +26,7 @@ services:
       - "8082:8090"
     volumes:
       - ./data:/app/data
-      - /vol1:/vol1:ro
+      - /vol1:/vol1          # 需要可写才能删除；只做检测可改为 /vol1:/vol1:ro
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
     stop_grace_period: 15s

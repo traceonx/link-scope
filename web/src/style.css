@@ -20,6 +20,8 @@
   --violet-bg: #eee9fc;
   --teal-ink: #0f6e66;
   --teal-bg: #ddf3f0;
+  --green-ink: #1f6b2f;
+  --green-bg: #e3f4e6;
   --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
 }
@@ -47,6 +49,8 @@
     --violet-bg: #2b2347;
     --teal-ink: #7fd6cb;
     --teal-bg: #15332f;
+    --green-ink: #8fd69c;
+    --green-bg: #17301c;
   }
 }
 
@@ -78,6 +82,7 @@ html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: v
 .badge-violet { background: var(--violet-bg); color: var(--violet-ink); }
 .badge-teal { background: var(--teal-bg); color: var(--teal-ink); }
 .badge-gray { background: var(--chip); color: var(--ink-2); }
+.badge-green { background: var(--green-bg); color: var(--green-ink); }
 
 .notice {
   display: flex; gap: 10px; padding: 10px 12px; border-radius: 8px;

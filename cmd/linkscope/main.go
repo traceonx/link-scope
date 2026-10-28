@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/traceonx/link-scope/internal/config"
+	"github.com/traceonx/link-scope/internal/fileops"
 	"github.com/traceonx/link-scope/internal/jobs"
 	"github.com/traceonx/link-scope/internal/server"
+	"github.com/traceonx/link-scope/internal/torrents"
 	"github.com/traceonx/link-scope/internal/update"
 	"github.com/traceonx/link-scope/internal/version"
 	"github.com/traceonx/link-scope/web"
@@ -30,15 +32,31 @@ func main() {
 	log.Println(version.Banner())
 
 	cfg := config.Load()
-	jm := jobs.New(cfg.DataDir)
+	dl := torrents.NewStore(cfg.DataDir)
+	jm := jobs.New(cfg.DataDir, dl)
 	um := update.New(cfg.DataDir)
+	ops := fileops.New(cfg.Roots, cfg.DataDir, cfg.TrashDays, cfg.DeleteDisabled)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go um.RunAutoUpdate(ctx)
+	go func() { // 每小时清理过期的回收站条目
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		for {
+			if n := ops.CleanExpired(); n > 0 {
+				log.Printf("回收站：已清除 %d 个过期条目", n)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+		}
+	}()
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           server.New(cfg, jm, um, web.FS()).Handler(),
+		Handler:           server.New(cfg, jm, um, ops, dl, web.FS()).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

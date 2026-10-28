@@ -20,6 +20,8 @@ type Config struct {
 	Workers        int
 	HashWorkers    int
 	SkipDirs       map[string]bool
+	DeleteDisabled bool // LS_DELETE=false 关闭删除
+	TrashDays      int  // 回收站保留天数
 }
 
 func list(name, def string) []string {
@@ -61,7 +63,9 @@ func Load() *Config {
 		AuthPass:       os.Getenv("LS_AUTH_PASS"),
 		Workers:        num("LS_WORKERS", min(16, max(4, runtime.NumCPU()*2))),
 		HashWorkers:    num("LS_HASH_WORKERS", 2),
-		SkipDirs:       map[string]bool{},
+		SkipDirs:       map[string]bool{".linkscope-trash": true},
+		DeleteDisabled: os.Getenv("LS_DELETE") == "false",
+		TrashDays:      num("LS_TRASH_DAYS", 30),
 	}
 	for _, r := range list("LS_ROOTS", "") {
 		if real, err := filepath.EvalSymlinks(r); err == nil {

@@ -16,5 +16,5 @@ services:
       - "${WEB_PORT:-8082}:8090"
     volumes:
       - ./data:/app/data
-      - ${LS_MOUNT:-/vol1}:${LS_MOUNT:-/vol1}:ro
+      - ${LS_MOUNT:-/vol1}:${LS_MOUNT:-/vol1}
     restart: unless-stopped
