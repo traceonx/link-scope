@@ -11,7 +11,7 @@ LinkScope · 链接透视：运行在 NAS（飞牛 fnOS）上的链接检测工�
 ## 代码结构
 
 - `internal/scanner`：扫描核心，不依赖 Web。性能敏感：遍历用并发 `os.ReadDir` + `syscall.Lstat`，指纹计算复用 worker 缓冲区，不要在热路径里分配大块内存。改动后可跑 `LS_BENCH_N=200000 go test -run TestLargeScan -v ./internal/scanner/` 对比耗时。
-- `internal/jobs`：后台扫描任务与结果持久化（`last_scan.json`）。
+- `internal/jobs`：后台扫描任务与结果持久化（`last_scan.json`）；`folders.go` 按检测目录的一级子项汇总文件夹视图（结果变化时清空缓存）。
 - `internal/server`：HTTP 接口，Go 标准库 `net/http` 路由；`/api/health` 不需要登录。
 - `internal/fileops`：删除与回收站。回收站在所属根目录下的 `.linkscope-trash`（扫描始终跳过）；只能操作 `LS_ROOTS` 内、非根目录的路径；路径本身是软链接时删除链接而不是目标。释放空间按 (dev, inode) 统计：选中路径数 ≥ nlink 才算释放。
 - `internal/torrents`：下载器（qBittorrent WebUI API / Transmission RPC，多实例）与站点识别；配置在 `DATA_DIR/downloaders.json`（含密码，0600，接口不返回密码）。`jobs/annotate.go` 把种子信息标注到扫描结果：标签 torrent / seeding / unregistered / orphan。

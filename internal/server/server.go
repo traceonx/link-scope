@@ -52,6 +52,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("GET /api/result", s.result)
 	mux.HandleFunc("GET /api/export.csv", s.exportCSV)
+	mux.HandleFunc("GET /api/folders", s.folders)
+	mux.HandleFunc("GET /api/folders.csv", s.foldersCSV)
 	mux.HandleFunc("POST /api/delete/preview", s.deletePreview)
 	mux.HandleFunc("POST /api/delete", s.deletePaths)
 	mux.HandleFunc("GET /api/trash", s.trashList)
@@ -339,7 +341,8 @@ func (s *Server) result(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
-	count, items := s.jobs.Query(filter, q.Get("site"), q.Get("q"), offset, limit)
+	count, items := s.jobs.Query(jobs.Q{Filter: filter, Site: q.Get("site"), Text: q.Get("q"), Dir: q.Get("dir"),
+		Offset: offset, Limit: limit})
 	writeJSON(w, 200, map[string]any{
 		"summary": s.jobs.Summary(), "counts": s.jobs.Counts(), "count": count, "items": items,
 	})
@@ -380,7 +383,8 @@ func (s *Server) exportCSV(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "未知的筛选项")
 		return
 	}
-	_, items := s.jobs.Query(filter, r.URL.Query().Get("site"), r.URL.Query().Get("q"), 0, 0)
+	_, items := s.jobs.Query(jobs.Q{Filter: filter, Site: r.URL.Query().Get("site"), Text: r.URL.Query().Get("q"),
+		Dir: r.URL.Query().Get("dir")})
 	name := time.Now().Format("links_20060102_150405.csv")
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
@@ -492,6 +496,8 @@ type deleteRequest struct {
 	Filter    string   `json:"filter"` // 与 paths 二选一：删除当前筛选的全部结果
 	Site      string   `json:"site"`
 	Q         string   `json:"q"`
+	Dir       string   `json:"dir"`
+	View      string   `json:"view"` // folders：按文件夹视图的筛选结果删除整个文件夹
 	Permanent bool     `json:"permanent"`
 }
 
@@ -503,13 +509,24 @@ func (s *Server) deleteTargets(w http.ResponseWriter, r *http.Request) ([]string
 	}
 	paths := req.Paths
 	if len(paths) == 0 && req.Filter != "" {
-		if !validFilter(req.Filter) {
+		if req.View != "folders" && !validFilter(req.Filter) {
 			fail(w, 400, "未知的筛选项")
 			return nil, nil, false
 		}
-		_, items := s.jobs.Query(req.Filter, req.Site, req.Q, 0, 0)
-		for _, it := range items {
-			paths = append(paths, it.Path)
+		if req.View == "folders" {
+			if !validFolderFilter(req.Filter) {
+				fail(w, 400, "未知的筛选项")
+				return nil, nil, false
+			}
+			_, folders := s.jobs.Folders(jobs.Q{Filter: req.Filter, Site: req.Site, Text: req.Q})
+			for _, f := range folders {
+				paths = append(paths, f.Path)
+			}
+		} else {
+			_, items := s.jobs.Query(jobs.Q{Filter: req.Filter, Site: req.Site, Text: req.Q, Dir: req.Dir})
+			for _, it := range items {
+				paths = append(paths, it.Path)
+			}
 		}
 	}
 	if len(paths) == 0 {
@@ -676,4 +693,77 @@ func (s *Server) torrentsRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, ts)
+}
+
+// ---- 文件夹视图 ----
+
+func validFolderFilter(f string) bool {
+	for _, x := range jobs.FolderFilters {
+		if f == x {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) folders(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	filter := q.Get("filter")
+	if filter == "" {
+		filter = "all"
+	}
+	if !validFolderFilter(filter) {
+		fail(w, 400, "未知的筛选项")
+		return
+	}
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	limit, err := strconv.Atoi(q.Get("limit"))
+	if err != nil || limit <= 0 || limit > 2000 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	counts, list := s.jobs.Folders(jobs.Q{Filter: filter, Site: q.Get("site"), Text: q.Get("q")})
+	total := len(list)
+	if offset > total {
+		offset = total
+	}
+	end := min(total, offset+limit)
+	writeJSON(w, 200, map[string]any{
+		"summary": s.jobs.Summary(), "counts": counts, "count": total, "items": list[offset:end],
+	})
+}
+
+var folderStatusLabel = map[string]string{"linked": "全部链接", "partial": "部分链接", "unlinked": "未链接"}
+
+func (s *Server) foldersCSV(w http.ResponseWriter, r *http.Request) {
+	if s.jobs.Summary() == nil {
+		fail(w, 404, "还没有扫描结果")
+		return
+	}
+	q := r.URL.Query()
+	filter := q.Get("filter")
+	if filter == "" {
+		filter = "all"
+	}
+	if !validFolderFilter(filter) {
+		fail(w, 400, "未知的筛选项")
+		return
+	}
+	_, list := s.jobs.Folders(jobs.Q{Filter: filter, Site: q.Get("site"), Text: q.Get("q")})
+	name := time.Now().Format("folders_20060102_150405.csv")
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	_, _ = w.Write([]byte("\xEF\xBB\xBF"))
+	cw := csv.NewWriter(w)
+	_ = cw.Write([]string{"状态", "文件夹", "文件数", "已链接", "未链接", "大小(字节)", "重复副本", "站点", "做种中", "已删种", "孤儿文件"})
+	for _, f := range list {
+		_ = cw.Write([]string{
+			folderStatusLabel[f.Status], f.Path, strconv.Itoa(f.Files), strconv.Itoa(f.Linked), strconv.Itoa(f.Unlinked),
+			strconv.FormatInt(f.Size, 10), strconv.Itoa(f.Dups), strings.Join(f.Sites, " | "),
+			strconv.Itoa(f.Seeding), strconv.Itoa(f.Unregistered), strconv.Itoa(f.Orphans),
+		})
+	}
+	cw.Flush()
 }

@@ -6,8 +6,8 @@ import { badgesOf, torrentBadge } from '../badges'
 import { copyText, fmtSize, fmtTime } from '../format'
 import type { Item } from '../types'
 
-const props = defineProps<{ item: Item | null; canDelete: boolean }>()
-const emit = defineEmits<{ (e: 'delete', paths: string[], title: string): void }>()
+const props = defineProps<{ item: Item | null; canDelete: boolean; backLabel?: string }>()
+const emit = defineEmits<{ (e: 'delete', paths: string[], title: string): void; (e: 'back'): void }>()
 const message = useMessage()
 
 interface PathRow {
@@ -51,6 +51,10 @@ async function copyAll() {
   <aside class="card detail" aria-label="详情" aria-live="polite">
     <div v-if="!item" class="detail-empty">点击列表中的条目，查看所有链接路径</div>
     <template v-else>
+      <NButton v-if="backLabel" text size="small" class="back" @click="emit('back')">
+        <template #icon><Icon name="up" :size="14" style="transform: rotate(-90deg)" /></template>
+        {{ backLabel }}
+      </NButton>
       <div class="detail-head">
         <span class="eyebrow">{{ item.type === 'file' ? '文件详情' : item.type === 'strm' ? 'STRM 详情' : '软链接详情' }}</span>
         <h2 class="detail-name">{{ item.name }}</h2>
@@ -184,6 +188,7 @@ async function copyAll() {
 <style scoped>
 .detail { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
 .detail-empty { padding: 40px 8px; text-align: center; font-size: 14px; color: var(--ink-2); }
+.back { align-self: flex-start; color: var(--ink-2); }
 .detail-head { display: flex; flex-direction: column; gap: 8px; }
 .eyebrow { font-size: 12px; font-weight: 600; color: var(--ink-2); }
 .detail-name { margin: 0; font-size: 16px; font-weight: 600; line-height: 24px; word-break: break-all; }

@@ -15,6 +15,8 @@
 | **站点已删种** | Tracker 返回「未注册 / 种子不存在」等错误的种子 |
 | **孤儿文件** | 在下载目录里，但不属于任何种子的文件 |
 
+结果可以**按文件夹**（默认）或**按文件**查看。按文件夹时，检测目录下的每个一级子文件夹是一行：里面有文件被硬链接即为「已链接」，并区分全部链接 / 部分链接 / 未链接；点开文件夹可看到其中每个文件，再点文件查看完整的链接详情。
+
 重复比对有两种方式：**抽样**（默认，只读每个文件的头、中、尾各 1 MB，速度快）和**完整**（读完整个文件，最准确但慢）。只有大小完全相同的文件才会被比对。
 
 ## 删除与回收站
@@ -133,9 +135,10 @@ scripts/            独立的命令行检测脚本（Python，无需部署）
 | POST | `/api/scan` | 开始扫描 `{source, targets, recursive, min_size_mb, dup_mode}` |
 | POST | `/api/scan/cancel` | 取消扫描 |
 | GET | `/api/status` | 进度和上次扫描汇总 |
-| GET | `/api/result?filter=&site=&q=&offset=&limit=` | 分页结果；filter：all / linked / unlinked / dup / symlink / strm / broken / torrent / seeding / unregistered / orphan |
-| GET | `/api/export.csv?filter=&site=&q=` | 导出 CSV（Excel 可直接打开） |
-| POST | `/api/delete/preview`、`/api/delete` | 删除预览 / 删除 `{paths}` 或 `{filter, site, q}`，`permanent` |
+| GET | `/api/result?filter=&site=&q=&dir=&offset=&limit=` | 分页结果；filter：all / linked / unlinked / dup / symlink / strm / broken / torrent / seeding / unregistered / orphan |
+| GET | `/api/export.csv?filter=&site=&q=&dir=` | 导出 CSV（Excel 可直接打开） |
+| GET | `/api/folders?filter=&site=&q=&offset=&limit=`、`/api/folders.csv` | 文件夹视图；filter：all / linked / full / partial / unlinked / dup / seeding / unregistered / orphan |
+| POST | `/api/delete/preview`、`/api/delete` | 删除预览 / 删除 `{paths}`、`{filter, site, q, dir}` 或 `{view: "folders", filter, site, q}`，`permanent` |
 | GET / POST | `/api/trash`、`/api/trash/restore`、`/api/trash/purge` | 回收站列表 / 恢复 / 永久删除 |
 | GET / POST / DELETE | `/api/downloaders`、`/api/downloaders/test`、`/api/downloaders/{id}` | 下载器配置 |
 | POST | `/api/torrents/refresh` | 重新读取种子并更新结果 |

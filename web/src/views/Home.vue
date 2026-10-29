@@ -1,17 +1,32 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { NButton, NCheckbox, NInput, NProgress, NSelect, NTabs, NTab, useMessage } from 'naive-ui'
+import { NButton, NCheckbox, NInput, NProgress, NRadioButton, NRadioGroup, NSelect, NTabs, NTab, useMessage } from 'naive-ui'
 import Icon from '../components/Icon.vue'
 import FolderPicker from '../components/FolderPicker.vue'
 import ResultTable from '../components/ResultTable.vue'
 import DetailPanel from '../components/DetailPanel.vue'
+import FolderTable from '../components/FolderTable.vue'
+import FolderDetail from '../components/FolderDetail.vue'
 import UpdateModal from '../components/UpdateModal.vue'
 import DeleteDialog from '../components/DeleteDialog.vue'
 import TrashModal from '../components/TrashModal.vue'
 import DownloaderModal from '../components/DownloaderModal.vue'
 import { api } from '../api'
 import { fmtCount, fmtSize, fmtTime } from '../format'
-import type { AppConfig, DeleteResult, DeleteTarget, DupMode, Filter, Item, JobState, Summary, UpdateStatus } from '../types'
+import type {
+  AppConfig,
+  DeleteResult,
+  DeleteTarget,
+  DupMode,
+  Filter,
+  Folder,
+  FolderFilter,
+  Item,
+  JobState,
+  Summary,
+  UpdateStatus,
+  ViewMode,
+} from '../types'
 
 const message = useMessage()
 
@@ -57,6 +72,33 @@ const items = ref<Item[]>([])
 const count = ref(0)
 const loading = ref(false)
 const selected = ref<Item | null>(null)
+
+// ---- 视图：按文件夹 / 按文件 ----
+function loadView(): ViewMode {
+  try {
+    return localStorage.getItem('ls.view') === 'files' ? 'files' : 'folders'
+  } catch {
+    return 'folders'
+  }
+}
+const view = ref<ViewMode>(loadView())
+const dirFilter = ref('') // 文件视图中只看某个文件夹
+const emptyFolderCounts: Record<FolderFilter, number> = {
+  all: 0,
+  linked: 0,
+  full: 0,
+  partial: 0,
+  unlinked: 0,
+  dup: 0,
+  seeding: 0,
+  unregistered: 0,
+  orphan: 0,
+}
+const fFilter = ref<FolderFilter>('all')
+const fCounts = ref<Record<FolderFilter, number>>({ ...emptyFolderCounts })
+const folders = ref<Folder[]>([])
+const selFolder = ref<Folder | null>(null)
+const drillItem = ref<Item | null>(null) // 文件夹视图中点开的单个文件
 const detailEl = ref<HTMLElement | null>(null)
 
 const running = computed(() => job.value.status === 'running')
@@ -77,6 +119,23 @@ const filters = computed(() => {
       { key: 'seeding', label: '做种中' },
       { key: 'unregistered', label: '已删种' },
       { key: 'orphan', label: '孤儿文件' },
+    )
+  }
+  return list
+})
+const folderFilters = computed(() => {
+  const list: { key: FolderFilter; label: string }[] = [
+    { key: 'all', label: '全部' },
+    { key: 'linked', label: '已链接' },
+    { key: 'partial', label: '部分链接' },
+    { key: 'unlinked', label: '未链接' },
+    { key: 'dup', label: '含重复副本' },
+  ]
+  if (hasTorrents.value) {
+    list.push(
+      { key: 'seeding', label: '做种中' },
+      { key: 'unregistered', label: '已删种' },
+      { key: 'orphan', label: '含孤儿文件' },
     )
   }
   return list
@@ -109,14 +168,26 @@ const progressPct = computed(() => {
 // ---- 数据加载 ----
 async function loadResult() {
   loading.value = true
+  const offset = (page.value - 1) * pageSize.value
   try {
-    const r = await api.result(filter.value, site.value, q.value, (page.value - 1) * pageSize.value, pageSize.value)
-    items.value = r.items
-    count.value = r.count
-    counts.value = { ...emptyCounts, ...r.counts }
-    summary.value = r.summary
-    if (selected.value) {
-      selected.value = r.items.find((it) => it.path === selected.value?.path) ?? selected.value
+    if (view.value === 'folders') {
+      const r = await api.folders(fFilter.value, site.value, q.value, offset, pageSize.value)
+      folders.value = r.items
+      count.value = r.count
+      fCounts.value = { ...emptyFolderCounts, ...r.counts }
+      summary.value = r.summary
+      if (selFolder.value) {
+        selFolder.value = r.items.find((f) => f.path === selFolder.value?.path) ?? selFolder.value
+      }
+    } else {
+      const r = await api.result(filter.value, site.value, q.value, offset, pageSize.value, dirFilter.value)
+      items.value = r.items
+      count.value = r.count
+      counts.value = { ...emptyCounts, ...r.counts }
+      summary.value = r.summary
+      if (selected.value) {
+        selected.value = r.items.find((it) => it.path === selected.value?.path) ?? selected.value
+      }
     }
   } catch (e) {
     message.error((e as Error).message)
@@ -142,6 +213,8 @@ function startPolling() {
         summary.value = s.summary
         page.value = 1
         selected.value = null
+        selFolder.value = null
+        drillItem.value = null
         await loadResult()
         message.success(`扫描完成，用时 ${s.summary?.duration ?? 0} 秒`)
       } else if (s.state.status === 'error') {
@@ -201,7 +274,19 @@ onMounted(async () => {
 })
 onBeforeUnmount(stopPolling)
 
-watch([filter, site], () => {
+watch(view, (v) => {
+  try {
+    localStorage.setItem('ls.view', v)
+  } catch {
+    /* 无痕模式等情况下忽略 */
+  }
+  page.value = 1
+  checked.value = []
+  drillItem.value = null
+  if (v === 'folders') dirFilter.value = ''
+  loadResult()
+})
+watch([filter, fFilter, site, dirFilter], () => {
   page.value = 1
   checked.value = []
   loadResult()
@@ -221,6 +306,22 @@ function onPageSize(s: number) {
   page.value = 1
 }
 
+function scrollToDetail() {
+  if (window.matchMedia('(max-width: 1023px)').matches) {
+    requestAnimationFrame(() => detailEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
+}
+function selectFolder(f: Folder) {
+  selFolder.value = f
+  drillItem.value = null
+  scrollToDetail()
+}
+function openFiles(f: Folder) {
+  dirFilter.value = f.path
+  filter.value = 'all'
+  selected.value = null
+  view.value = 'files'
+}
 function select(it: Item) {
   selected.value = it
   // 窄屏时详情在列表下方，自动滚过去
@@ -245,7 +346,15 @@ function removeTarget(t: string) {
   form.targets = form.targets.filter((x) => x !== t)
 }
 
-const exportUrl = computed(() => api.exportUrl(filter.value, site.value, q.value))
+const exportUrl = computed(() =>
+  view.value === 'folders'
+    ? api.foldersExportUrl(fFilter.value, site.value, q.value)
+    : api.exportUrl(filter.value, site.value, q.value, dirFilter.value),
+)
+const dirLabel = computed(() => {
+  const src = summary.value?.source ?? ''
+  return dirFilter.value.startsWith(src + '/') ? dirFilter.value.slice(src.length + 1) : dirFilter.value
+})
 
 // ---- 删除 ----
 const del = reactive({ show: false, target: null as DeleteTarget | null, title: '' })
@@ -264,8 +373,19 @@ function deleteChecked() {
   deletePaths([...checked.value], `删除所选 ${checked.value.length} 项`)
 }
 function deleteAllFiltered() {
+  if (view.value === 'folders') {
+    const f = folderFilters.value.find((x) => x.key === fFilter.value)?.label ?? '全部'
+    askDelete(
+      { view: 'folders', filter: fFilter.value, site: site.value, q: q.value },
+      `删除「${f}」中的全部 ${count.value} 个文件夹`,
+    )
+    return
+  }
   const f = filters.value.find((x) => x.key === filter.value)?.label ?? '全部'
-  askDelete({ filter: filter.value, site: site.value, q: q.value }, `删除「${f}」中的全部 ${count.value} 项`)
+  askDelete(
+    { filter: filter.value, site: site.value, q: q.value, dir: dirFilter.value },
+    `删除「${f}」中的全部 ${count.value} 项`,
+  )
 }
 async function onDeleted(r: DeleteResult) {
   if (!r.deleted) return
@@ -273,6 +393,8 @@ async function onDeleted(r: DeleteResult) {
   pickerReload.value++
   await loadResult()
   if (selected.value && !items.value.some((x) => x.path === selected.value?.path)) selected.value = null
+  if (selFolder.value && !folders.value.some((x) => x.path === selFolder.value?.path)) selFolder.value = null
+  drillItem.value = null
 }
 
 // ---- 回收站与下载器 ----
@@ -518,14 +640,23 @@ onMounted(() => {
     <div class="content">
       <section class="card list" aria-label="结果列表">
         <div class="toolbar">
-          <NTabs v-model:value="filter" type="line" size="small" class="filter-tabs">
+          <NRadioGroup v-model:value="view" size="small" class="view-switch" aria-label="显示方式">
+            <NRadioButton value="folders">按文件夹</NRadioButton>
+            <NRadioButton value="files">按文件</NRadioButton>
+          </NRadioGroup>
+          <NTabs v-if="view === 'folders'" v-model:value="fFilter" type="line" size="small" class="filter-tabs">
+            <NTab v-for="f in folderFilters" :key="f.key" :name="f.key">
+              {{ f.label }}<span class="tab-count">{{ fmtCount(fCounts[f.key]) }}</span>
+            </NTab>
+          </NTabs>
+          <NTabs v-else v-model:value="filter" type="line" size="small" class="filter-tabs">
             <NTab v-for="f in filters" :key="f.key" :name="f.key">
               {{ f.label }}<span class="tab-count">{{ fmtCount(counts[f.key]) }}</span>
             </NTab>
           </NTabs>
           <div class="toolbar-right">
             <label for="q" class="sr-only">搜索文件名或路径</label>
-            <NInput v-model:value="q" :input-props="{ id: 'q' }" placeholder="搜索文件名或路径" clearable class="search">
+            <NInput v-model:value="q" :input-props="{ id: 'q' }" :placeholder="view === 'folders' ? '搜索文件夹名' : '搜索文件名或路径'" clearable class="search">
               <template #prefix><Icon name="search" /></template>
             </NInput>
             <NSelect
@@ -541,7 +672,16 @@ onMounted(() => {
             </NButton>
           </div>
         </div>
-        <div v-if="canDelete && (checked.length || (filter !== 'all' && count))" class="bulk">
+        <div v-if="view === 'files' && dirFilter" class="bulk">
+          <Icon name="folder" />
+          <span>只显示 <b>{{ dirLabel }}</b> 中的文件</span>
+          <NButton size="small" quaternary @click="dirFilter = ''">显示全部</NButton>
+          <NButton size="small" quaternary @click="view = 'folders'">返回文件夹视图</NButton>
+        </div>
+        <div
+          v-if="canDelete && (checked.length || ((view === 'folders' ? fFilter : filter) !== 'all' && count))"
+          class="bulk"
+        >
           <template v-if="checked.length">
             <span>已选 {{ checked.length }} 项</span>
             <NButton size="small" type="error" secondary @click="deleteChecked">
@@ -558,7 +698,23 @@ onMounted(() => {
             </NButton>
           </template>
         </div>
+        <FolderTable
+          v-if="view === 'folders'"
+          v-model:checked="checked"
+          :selectable="canDelete"
+          :show-torrents="hasTorrents"
+          :items="folders"
+          :count="count"
+          :page="page"
+          :page-size="pageSize"
+          :loading="loading"
+          :selected="selFolder?.path ?? null"
+          @select="selectFolder"
+          @update:page="(p: number) => (page = p)"
+          @update:page-size="onPageSize"
+        />
         <ResultTable
+          v-else
           v-model:checked="checked"
           :selectable="canDelete"
           :show-torrents="hasTorrents"
@@ -576,7 +732,25 @@ onMounted(() => {
       </section>
 
       <div ref="detailEl" class="detail-wrap">
-        <DetailPanel :item="selected" :can-delete="canDelete" @delete="deletePaths" />
+        <template v-if="view === 'folders'">
+          <DetailPanel
+            v-if="drillItem"
+            :item="drillItem"
+            :can-delete="canDelete"
+            :back-label="`返回 ${selFolder?.name ?? '文件夹'}`"
+            @back="drillItem = null"
+            @delete="deletePaths"
+          />
+          <FolderDetail
+            v-else
+            :folder="selFolder"
+            :can-delete="canDelete"
+            @delete="deletePaths"
+            @open-files="openFiles"
+            @open-file="(it: Item) => (drillItem = it)"
+          />
+        </template>
+        <DetailPanel v-else :item="selected" :can-delete="canDelete" @delete="deletePaths" />
       </div>
     </div>
   </main>
@@ -709,6 +883,7 @@ details summary { cursor: pointer; text-decoration: underline; }
 .site-bar span { display: block; height: 4px; background: var(--green-ink); }
 .site-meta { font-size: 12px; }
 .site-select { width: 180px; }
+.view-switch { flex-shrink: 0; margin-bottom: 8px; }
 .bulk {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 16px;
   border-bottom: 1px solid var(--border); background: var(--soft); font-size: 13px;

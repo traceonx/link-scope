@@ -169,8 +169,42 @@ export interface UpdateStatus {
   state: UpdateState
 }
 
-/** 删除对象：指定路径，或当前筛选的全部结果 */
-export type DeleteTarget = { paths: string[] } | { filter: Filter; site: string; q: string }
+/** 删除对象：指定路径，或当前筛选的全部结果（文件视图 / 文件夹视图） */
+export type DeleteTarget =
+  | { paths: string[] }
+  | { filter: Filter; site: string; q: string; dir: string }
+  | { view: 'folders'; filter: FolderFilter; site: string; q: string }
+
+export type ViewMode = 'folders' | 'files'
+export type FolderFilter = 'all' | 'linked' | 'full' | 'partial' | 'unlinked' | 'dup' | 'seeding' | 'unregistered' | 'orphan'
+
+export interface Folder {
+  name: string
+  path: string
+  is_file: boolean
+  status: 'linked' | 'partial' | 'unlinked'
+  files: number
+  linked: number
+  unlinked: number
+  size: number
+  linked_size: number
+  dups: number
+  symlinks: number
+  broken: number
+  torrents: number
+  seeding: number
+  unregistered: number
+  orphans: number
+  sites: string[]
+  mtime: number
+}
+
+export interface FolderPage {
+  summary: Summary | null
+  counts: Record<FolderFilter, number>
+  count: number
+  items: Folder[]
+}
 
 export interface DeletePreviewItem {
   path: string

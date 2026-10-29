@@ -349,3 +349,35 @@ func TestDownloadersAndTorrents(t *testing.T) {
 		t.Errorf("刷新种子: %d", c)
 	}
 }
+
+func TestFoldersAPI(t *testing.T) {
+	ts, root := newTestServer(t, nil)
+	_ = os.MkdirAll(root+"/Downloads/Show", 0o755)
+	_ = os.WriteFile(root+"/Downloads/Show/e1.mkv", []byte("e1"), 0o644)
+	runScan(t, ts.URL, root)
+	var res struct {
+		Count  int            `json:"count"`
+		Counts map[string]int `json:"counts"`
+		Items  []struct {
+			Name, Status string
+		} `json:"items"`
+	}
+	getJSON(t, ts.URL+"/api/folders", &res)
+	if res.Count != 3 || res.Counts["linked"] != 1 || res.Counts["unlinked"] != 2 {
+		t.Errorf("文件夹视图: %+v", res)
+	}
+	getJSON(t, ts.URL+"/api/folders?filter=unlinked&q=show", &res)
+	if res.Count != 1 || res.Items[0].Name != "Show" {
+		t.Errorf("筛选: %+v", res)
+	}
+	var pv struct {
+		Preview struct{ Count, Dirs int } `json:"preview"`
+	}
+	postJSON(t, ts.URL+"/api/delete/preview", `{"view":"folders","filter":"unlinked","q":"show"}`, &pv)
+	if pv.Preview.Count != 1 || pv.Preview.Dirs != 1 {
+		t.Errorf("按文件夹删除预览: %+v", pv)
+	}
+	if c := getJSON(t, ts.URL+"/api/folders?filter=bad", &res); c != 400 {
+		t.Errorf("非法筛选应 400: %d", c)
+	}
+}

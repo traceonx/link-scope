@@ -6,6 +6,8 @@ import type {
   DeleteResult,
   DeleteTarget,
   Downloader,
+  FolderFilter,
+  FolderPage,
   Filter,
   JobState,
   ResultPage,
@@ -47,12 +49,18 @@ export const api = {
   scan: (body: ScanRequest) => request<{ ok: boolean }>('api/scan', { method: 'POST', body: JSON.stringify(body) }),
   cancel: () => request<{ ok: boolean }>('api/scan/cancel', { method: 'POST' }),
   status: () => request<{ state: JobState; summary: Summary | null }>('api/status'),
-  result: (filter: Filter, site: string, q: string, offset: number, limit: number) =>
+  result: (filter: Filter, site: string, q: string, offset: number, limit: number, dir = '') =>
     request<ResultPage>(
-      `api/result?filter=${filter}&site=${encodeURIComponent(site)}&q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}`,
+      `api/result?filter=${filter}&site=${encodeURIComponent(site)}&q=${encodeURIComponent(q)}&dir=${encodeURIComponent(dir)}&offset=${offset}&limit=${limit}`,
     ),
-  exportUrl: (filter: Filter, site: string, q: string) =>
-    `api/export.csv?filter=${filter}&site=${encodeURIComponent(site)}&q=${encodeURIComponent(q)}`,
+  exportUrl: (filter: Filter, site: string, q: string, dir = '') =>
+    `api/export.csv?filter=${filter}&site=${encodeURIComponent(site)}&q=${encodeURIComponent(q)}&dir=${encodeURIComponent(dir)}`,
+  folders: (filter: FolderFilter, site: string, q: string, offset: number, limit: number) =>
+    request<FolderPage>(
+      `api/folders?filter=${filter}&site=${encodeURIComponent(site)}&q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}`,
+    ),
+  foldersExportUrl: (filter: FolderFilter, site: string, q: string) =>
+    `api/folders.csv?filter=${filter}&site=${encodeURIComponent(site)}&q=${encodeURIComponent(q)}`,
 
   deletePreview: (t: DeleteTarget) =>
     request<DeletePreview>('api/delete/preview', { method: 'POST', body: JSON.stringify(t) }),

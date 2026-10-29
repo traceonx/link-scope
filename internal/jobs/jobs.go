@@ -46,6 +46,7 @@ type Manager struct {
 	lower   []string // 每条结果路径的小写形式，用于搜索
 	cancel  context.CancelFunc
 	fetcher Fetcher
+	folders []Folder // 文件夹视图缓存，结果变化时清空
 }
 
 func New(dataDir string, f Fetcher) *Manager {
@@ -93,6 +94,7 @@ func (m *Manager) setResult(r *scanner.Result) {
 		lower[i] = strings.ToLower(r.Items[i].Path)
 	}
 	m.result, m.counts, m.lower = r, counts, lower
+	m.folders = nil
 }
 
 // Start 启动一次扫描，已有扫描在运行时返回 ErrBusy。
@@ -173,18 +175,36 @@ func (m *Manager) Counts() map[string]int {
 	return out
 }
 
-// Query 按筛选项、站点和关键字过滤，返回总数和分页后的条目。limit<=0 表示不分页。
-func (m *Manager) Query(filter, site, q string, offset, limit int) (int, []scanner.Item) {
+// Q 是结果查询条件。
+type Q struct {
+	Filter string // 筛选项，空为 all
+	Site   string // 站点
+	Text   string // 关键字（匹配完整路径，不区分大小写）
+	Dir    string // 只看这个文件夹内的条目
+	Offset int
+	Limit  int // <=0 表示不分页
+}
+
+// Query 按条件过滤，返回总数和分页后的条目。
+func (m *Manager) Query(o Q) (int, []scanner.Item) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.result == nil {
 		return 0, []scanner.Item{}
 	}
-	q = strings.ToLower(strings.TrimSpace(q))
+	filter, site, offset, limit := o.Filter, o.Site, o.Offset, o.Limit
+	if filter == "" {
+		filter = "all"
+	}
+	q := strings.ToLower(strings.TrimSpace(o.Text))
+	dir := strings.TrimRight(o.Dir, "/")
 	out := []scanner.Item{}
 	count := 0
 	for i := range m.result.Items {
 		it := &m.result.Items[i]
+		if dir != "" && !strings.HasPrefix(it.Path, dir+"/") {
+			continue
+		}
 		if filter != "all" && !hasTag(it.Tags, filter) {
 			continue
 		}
