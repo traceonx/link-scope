@@ -65,6 +65,8 @@ export interface Summary {
   dup_mode: DupMode
   total: number
   total_size: number
+  linked_size: number
+  unlinked_size: number
   linked: number
   unlinked: number
   saved: number
@@ -199,12 +201,37 @@ export interface Folder {
   mtime: number
 }
 
+export interface FolderTotals {
+  folders: number
+  pending_folders: number
+  unlinked_folders: number
+  pending_files: number
+  pending_size: number
+  done_folders: number
+}
+
 export interface FolderPage {
   summary: Summary | null
   counts: Record<FolderFilter, number>
+  totals: FolderTotals
   count: number
   items: Folder[]
 }
+
+export type SortOrder = 'asc' | 'desc'
+export type FolderSort = 'name' | 'size' | 'pending' | 'files' | 'unlinked' | 'mtime'
+export type FileSort = 'path' | 'name' | 'size' | 'mtime' | 'nlink'
+
+export interface ScanPreset {
+  name: string
+  source: string
+  targets: string[]
+  recursive: boolean
+  skipSmall: boolean
+  dupMode: DupMode
+}
+
+export type ThemeMode = 'system' | 'light' | 'dark'
 
 export interface DeletePreviewItem {
   path: string

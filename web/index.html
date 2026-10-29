@@ -6,6 +6,13 @@
     <meta name="color-scheme" content="light dark" />
     <title>LinkScope · 链接透视</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <script>
+      // 在页面渲染前应用主题，避免切换时闪烁
+      try {
+        var t = localStorage.getItem('ls.theme')
+        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t)
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="app"></div>

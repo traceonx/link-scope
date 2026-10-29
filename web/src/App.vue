@@ -11,9 +11,10 @@ import {
   type GlobalThemeOverrides,
 } from 'naive-ui'
 import Home from './views/Home.vue'
+import { themePref } from './prefs'
 
 const osTheme = useOsTheme()
-const dark = computed(() => osTheme.value === 'dark')
+const dark = computed(() => (themePref.value === 'system' ? osTheme.value === 'dark' : themePref.value === 'dark'))
 const theme = computed(() => (dark.value ? darkTheme : null))
 
 const overrides = computed<GlobalThemeOverrides>(() => {

@@ -1,9 +1,16 @@
 <script setup lang="ts">
 import { computed, h } from 'vue'
-import { NDataTable, type DataTableColumns, type DataTableRowKey, type PaginationProps } from 'naive-ui'
+import {
+  NButton,
+  NDataTable,
+  type DataTableColumns,
+  type DataTableRowKey,
+  type DataTableSortState,
+  type PaginationProps,
+} from 'naive-ui'
 import { badgesOf, torrentSummaryOf } from '../badges'
 import { fmtSize, fmtTime } from '../format'
-import type { Item } from '../types'
+import type { FileSort, Item, SortOrder } from '../types'
 
 const props = defineProps<{
   items: Item[]
@@ -15,13 +22,27 @@ const props = defineProps<{
   checked: string[]
   selectable: boolean
   showTorrents: boolean
+  sort: FileSort
+  order: SortOrder
+  baseDir: string
 }>()
 const emit = defineEmits<{
-  (e: 'select', it: Item): void
+  (e: 'open', it: Item): void
   (e: 'update:page', p: number): void
   (e: 'update:pageSize', s: number): void
   (e: 'update:checked', keys: string[]): void
+  (e: 'sort', by: FileSort, order: SortOrder): void
 }>()
+
+function sortOrder(key: FileSort) {
+  return props.sort === key ? (props.order === 'desc' ? 'descend' : 'ascend') : false
+}
+// 目录显示为相对下载目录的路径，更短更易读
+function relDir(dir: string) {
+  const b = props.baseDir
+  if (b && dir === b) return '（下载目录根）'
+  return b && dir.startsWith(b + '/') ? dir.slice(b.length + 1) : dir
+}
 
 const columns = computed<DataTableColumns<Item>>(() => {
   const cols: DataTableColumns<Item> = []
@@ -30,7 +51,7 @@ const columns = computed<DataTableColumns<Item>>(() => {
     {
       title: '状态',
       key: 'status',
-      width: 120,
+      width: 112,
       render: (it) =>
         h(
           'div',
@@ -40,45 +61,80 @@ const columns = computed<DataTableColumns<Item>>(() => {
     },
     {
       title: '文件',
-      key: 'path',
+      key: 'name',
       minWidth: 280,
+      sorter: true,
+      sortOrder: sortOrder('name'),
       render: (it) =>
         h('div', { class: 'cell-file' }, [
-          h('span', { class: 'cell-name', title: it.name }, it.name),
+          h('span', { class: 'cell-name', title: it.path }, it.name),
           it.type === 'file'
-            ? h('span', { class: 'cell-dir mono', title: it.dir }, it.dir)
+            ? h('span', { class: 'cell-dir', title: it.dir }, relDir(it.dir))
             : h('span', { class: 'cell-dir mono', title: it.target }, `→ ${it.target || '（空）'}`),
         ]),
     },
-  )
-  if (props.showTorrents) {
-    cols.push({
-      title: '种子 / 站点',
-      key: 'torrents',
-      width: 170,
-      render: (it) => {
-        const s = torrentSummaryOf(it)
-        if (!s.badge) return h('span', { class: 'muted' }, '—')
-        return h('div', { class: 'cell-file' }, [
-          h('span', { class: ['badge', s.badge.cls], style: 'align-self: flex-start' }, s.badge.label),
-          s.sites.length ? h('span', { class: 'cell-dir', title: s.sites.join('、') }, s.sites.join('、')) : null,
-        ])
-      },
-    })
-  }
-  cols.push(
+    {
+      title: '大小',
+      key: 'size',
+      width: 100,
+      align: 'right',
+      sorter: true,
+      sortOrder: sortOrder('size'),
+      render: (it) => (it.size ? fmtSize(it.size) : '—'),
+    },
     {
       title: '链接数',
       key: 'nlink',
-      width: 76,
+      width: 84,
       align: 'right',
+      sorter: true,
+      sortOrder: sortOrder('nlink'),
       render: (it) =>
         it.type === 'file'
           ? h('span', { class: it.linked ? 'cell-nlink on' : 'cell-nlink' }, String(it.nlink ?? 1))
           : h('span', { class: 'muted' }, '—'),
     },
-    { title: '大小', key: 'size', width: 96, align: 'right', render: (it) => (it.size ? fmtSize(it.size) : '—') },
-    { title: '修改时间', key: 'mtime', width: 148, render: (it) => h('span', { class: 'muted' }, fmtTime(it.mtime)) },
+  )
+  if (props.showTorrents) {
+    cols.push(
+      {
+        title: '种子',
+        key: 'torrent',
+        width: 104,
+        render: (it) => {
+          const b = torrentSummaryOf(it).badge
+          return b ? h('span', { class: ['badge', b.cls] }, b.label) : h('span', { class: 'muted' }, '—')
+        },
+      },
+      {
+        title: '站点',
+        key: 'site',
+        width: 130,
+        ellipsis: { tooltip: true },
+        render: (it) => torrentSummaryOf(it).sites.join('、') || '—',
+      },
+    )
+  }
+  cols.push(
+    {
+      title: '修改时间',
+      key: 'mtime',
+      width: 140,
+      sorter: true,
+      sortOrder: sortOrder('mtime'),
+      render: (it) => h('span', { class: 'muted' }, fmtTime(it.mtime)),
+    },
+    {
+      title: '',
+      key: 'actions',
+      width: 72,
+      render: (it) =>
+        h(
+          NButton,
+          { size: 'small', quaternary: true, 'aria-label': `查看 ${it.name} 的详情`, onClick: () => emit('open', it) },
+          { default: () => '详情' },
+        ),
+    },
   )
   return cols
 })
@@ -99,14 +155,13 @@ function rowProps(it: Item) {
     style: 'cursor: pointer',
     tabindex: 0,
     onClick: (e: MouseEvent) => {
-      // 点击勾选框时不打开详情
-      if ((e.target as HTMLElement).closest('.n-checkbox')) return
-      emit('select', it)
+      if ((e.target as HTMLElement).closest('.n-checkbox, .n-button')) return
+      emit('open', it)
     },
     onKeydown: (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
+      if (e.key === 'Enter' && e.target === e.currentTarget) {
         e.preventDefault()
-        emit('select', it)
+        emit('open', it)
       }
     },
   }
@@ -114,6 +169,14 @@ function rowProps(it: Item) {
 
 const rowClass = (it: Item) => (it.path === props.selected ? 'row-selected' : '')
 const onChecked = (keys: DataTableRowKey[]) => emit('update:checked', keys.map(String))
+function onSorter(s: DataTableSortState | DataTableSortState[] | null) {
+  const st = Array.isArray(s) ? s[0] : s
+  if (!st || !st.order) {
+    emit('sort', 'path', 'asc')
+    return
+  }
+  emit('sort', String(st.columnKey) as FileSort, st.order === 'descend' ? 'desc' : 'asc')
+}
 </script>
 
 <template>
@@ -127,10 +190,11 @@ const onChecked = (keys: DataTableRowKey[]) => emit('update:checked', keys.map(S
     :row-props="rowProps"
     :row-class-name="rowClass"
     :checked-row-keys="checked"
-    :scroll-x="showTorrents ? 950 : 780"
+    :scroll-x="showTorrents ? 1080 : 840"
     :bordered="false"
     size="small"
     @update:checked-row-keys="onChecked"
+    @update:sorter="onSorter"
   />
 </template>
 

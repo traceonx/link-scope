@@ -124,6 +124,7 @@ func annotate(r *scanner.Result, snap *torrents.Snapshot) {
 func recount(r *scanner.Result) {
 	s := &r.Summary
 	s.Total, s.TotalSize, s.Linked, s.Saved, s.DupFiles, s.Symlinks, s.BrokenLinks, s.Strm, s.BrokenStrm = 0, 0, 0, 0, 0, 0, 0, 0, 0
+	s.LinkedSize, s.UnlinkedSize = 0, 0
 	var wasted float64
 	var groups float64
 	for i := range r.Items {
@@ -134,7 +135,10 @@ func recount(r *scanner.Result) {
 			s.TotalSize += it.Size
 			if it.Linked {
 				s.Linked++
+				s.LinkedSize += it.Size
 				s.Saved += it.Size * int64(it.Nlink-1)
+			} else {
+				s.UnlinkedSize += it.Size
 			}
 			if len(it.Dups) > 0 {
 				s.DupFiles++

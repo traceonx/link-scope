@@ -40,13 +40,107 @@ type Manager struct {
 	dataDir   string
 	retention time.Duration
 	disabled  bool
+	bases     map[string]bool // 用过的回收站所在目录（Btrfs 子卷等独立文件系统的顶层目录）
+}
+
+// devOf 返回路径所在设备号（不跟随软链接）；测试中可替换。
+var devOf = func(p string) (uint64, error) {
+	var st syscall.Stat_t
+	if err := syscall.Lstat(p, &st); err != nil {
+		return 0, err
+	}
+	return uint64(st.Dev), nil //nolint:unconvert
+}
+
+func within(p, root string) bool {
+	return p == root || strings.HasPrefix(p, strings.TrimRight(root, "/")+"/")
+}
+
+// trashBase 找到与 real 处于同一文件系统（同一设备号）的最上层目录（不超出 root）。
+// 飞牛 fnOS 的存储空间为 Btrfs，/vol2/1000 等用户目录是独立子卷，跨子卷无法 rename，
+// 因此回收站要放在文件所在子卷内，而不是存储空间根目录。
+func trashBase(real, root string) string {
+	dev, err := devOf(real)
+	dir := filepath.Dir(real)
+	if err != nil {
+		return dir
+	}
+	for dir != root {
+		parent := filepath.Dir(dir)
+		if parent == dir || !within(parent, root) {
+			break
+		}
+		if pd, err := devOf(parent); err != nil || pd != dev {
+			break
+		}
+		dir = parent
+	}
+	return dir
+}
+
+func (m *Manager) basesFile() string { return filepath.Join(m.dataDir, "trash-dirs.json") }
+
+func (m *Manager) loadBases() {
+	m.bases = map[string]bool{}
+	if b, err := os.ReadFile(m.basesFile()); err == nil {
+		var list []string
+		if json.Unmarshal(b, &list) == nil {
+			for _, d := range list {
+				m.bases[d] = true
+			}
+		}
+	}
+}
+
+func (m *Manager) addBase(base string) {
+	if m.bases[base] {
+		return
+	}
+	m.bases[base] = true
+	list := make([]string, 0, len(m.bases))
+	for d := range m.bases {
+		list = append(list, d)
+	}
+	sort.Strings(list)
+	_ = os.MkdirAll(m.dataDir, 0o755)
+	if b, err := json.Marshal(list); err == nil {
+		_ = os.WriteFile(m.basesFile(), b, 0o644)
+	}
+}
+
+// trashDirs 返回所有可能存放回收站的目录：各根目录及记录过的子卷目录（只保留仍在 roots 范围内的）。
+func (m *Manager) trashDirs() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(base string) {
+		d := filepath.Join(base, TrashDir)
+		if !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	for _, r := range m.roots {
+		add(r)
+	}
+	for b := range m.bases {
+		for _, r := range m.roots {
+			if within(b, r) {
+				add(b)
+				break
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func New(roots []string, dataDir string, trashDays int, disabled bool) *Manager {
 	if trashDays <= 0 {
 		trashDays = 30
 	}
-	return &Manager{roots: roots, dataDir: dataDir, retention: time.Duration(trashDays) * 24 * time.Hour, disabled: disabled}
+	m := &Manager{roots: roots, dataDir: dataDir, retention: time.Duration(trashDays) * 24 * time.Hour, disabled: disabled}
+	m.loadBases()
+	return m
 }
 
 func (m *Manager) TrashDays() int { return int(m.retention / (24 * time.Hour)) }
@@ -321,7 +415,11 @@ func (m *Manager) Delete(paths []string, permanent bool) ([]Result, []string, er
 		}
 		if err != nil {
 			r.Error = err.Error()
-			m.logf("失败 %s：%v", p, err)
+			mode := "移到回收站"
+			if permanent {
+				mode = "永久删除"
+			}
+			m.logf("%s失败 %s：%v", mode, p, err)
 		} else {
 			r.OK = true
 			done = append(done, real)
@@ -368,17 +466,22 @@ func (m *Manager) toTrash(real, root string) (string, error) {
 	default:
 		e.Kind, e.Size, e.Files = "file", fi.Size(), 1
 	}
-	dir := filepath.Join(root, TrashDir, e.ID)
+	base := trashBase(real, root)
+	if base == real || within(base, real) { // 不会发生：base 总是 real 的上级目录
+		base = filepath.Dir(real)
+	}
+	dir := filepath.Join(base, TrashDir, e.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("无法创建回收站目录：%v", err)
+		return "", fmt.Errorf("无法创建回收站目录 %s：%v", filepath.Dir(dir), err)
 	}
 	if err := os.Rename(real, filepath.Join(dir, e.Name)); err != nil {
 		_ = os.Remove(dir)
 		if errors.Is(err, syscall.EXDEV) {
-			return "", errors.New("文件与回收站不在同一个存储空间，无法移入回收站，请选择永久删除")
+			return "", errors.New("无法移入回收站（跨文件系统），请选择永久删除")
 		}
 		return "", err
 	}
+	m.addBase(base)
 	b, _ := json.Marshal(e)
 	_ = os.WriteFile(filepath.Join(dir, "meta.json"), b, 0o644)
 	return e.ID, nil
@@ -390,8 +493,8 @@ func (m *Manager) entryDir(id string) (string, *TrashEntry, error) {
 	if !idRe.MatchString(id) {
 		return "", nil, ErrNotFound
 	}
-	for _, r := range m.roots {
-		dir := filepath.Join(r, TrashDir, id)
+	for _, td := range m.trashDirs() {
+		dir := filepath.Join(td, id)
 		b, err := os.ReadFile(filepath.Join(dir, "meta.json"))
 		if err != nil {
 			continue
@@ -407,8 +510,8 @@ func (m *Manager) entryDir(id string) (string, *TrashEntry, error) {
 // Trash 列出回收站内容（新的在前）。
 func (m *Manager) Trash() []TrashEntry {
 	out := []TrashEntry{}
-	for _, r := range m.roots {
-		des, err := os.ReadDir(filepath.Join(r, TrashDir))
+	for _, td := range m.trashDirs() {
+		des, err := os.ReadDir(td)
 		if err != nil {
 			continue
 		}

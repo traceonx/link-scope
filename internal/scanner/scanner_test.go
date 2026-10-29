@@ -174,3 +174,15 @@ func TestMissingSource(t *testing.T) {
 		t.Error("源目录不存在时应报错")
 	}
 }
+
+func TestSummarySizes(t *testing.T) {
+	src, media := setup(t)
+	r, err := Scan(context.Background(), Options{Source: src, Targets: []string{media}, Recursive: true, MinSize: 2, DupMode: DupOff})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := r.Summary
+	if s.LinkedSize != int64(len("linked-content")) || s.LinkedSize+s.UnlinkedSize != s.TotalSize {
+		t.Errorf("sizes: linked=%d unlinked=%d total=%d", s.LinkedSize, s.UnlinkedSize, s.TotalSize)
+	}
+}

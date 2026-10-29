@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -181,6 +182,8 @@ type Q struct {
 	Site   string // 站点
 	Text   string // 关键字（匹配完整路径，不区分大小写）
 	Dir    string // 只看这个文件夹内的条目
+	Sort   string // 文件：path | name | size | mtime | nlink；文件夹：name | size | pending | files | unlinked | mtime
+	Order  string // asc | desc
 	Offset int
 	Limit  int // <=0 表示不分页
 }
@@ -214,12 +217,53 @@ func (m *Manager) Query(o Q) (int, []scanner.Item) {
 		if site != "" && !hasSite(it, site) {
 			continue
 		}
-		if count >= offset && (limit <= 0 || len(out) < limit) {
+		if o.Sort != "" && o.Sort != "path" || o.Order == "desc" {
+			out = append(out, *it) // 需要排序：先收集全部，排序后再分页
+		} else if count >= offset && (limit <= 0 || len(out) < limit) {
 			out = append(out, *it)
 		}
 		count++
 	}
+	if o.Sort != "" && o.Sort != "path" || o.Order == "desc" {
+		sortItems(out, o.Sort, o.Order)
+		if offset > len(out) {
+			offset = len(out)
+		}
+		end := len(out)
+		if limit > 0 && offset+limit < end {
+			end = offset + limit
+		}
+		out = out[offset:end]
+	}
 	return count, out
+}
+
+func sortItems(list []scanner.Item, by, order string) {
+	desc := order == "desc"
+	sort.SliceStable(list, func(i, j int) bool {
+		a, b := &list[i], &list[j]
+		var less, eq bool
+		switch by {
+		case "size":
+			less, eq = a.Size < b.Size, a.Size == b.Size
+		case "mtime":
+			less, eq = a.Mtime < b.Mtime, a.Mtime == b.Mtime
+		case "nlink":
+			less, eq = a.Nlink < b.Nlink, a.Nlink == b.Nlink
+		case "name":
+			na, nb := strings.ToLower(a.Name), strings.ToLower(b.Name)
+			less, eq = na < nb, na == nb
+		default:
+			less, eq = a.Path < b.Path, a.Path == b.Path
+		}
+		if eq {
+			return a.Path < b.Path
+		}
+		if desc {
+			return !less
+		}
+		return less
+	})
 }
 
 // RefreshTorrents 重新读取下载器并更新最近一次扫描结果中的种子信息。

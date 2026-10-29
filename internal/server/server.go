@@ -342,7 +342,7 @@ func (s *Server) result(w http.ResponseWriter, r *http.Request) {
 		offset = 0
 	}
 	count, items := s.jobs.Query(jobs.Q{Filter: filter, Site: q.Get("site"), Text: q.Get("q"), Dir: q.Get("dir"),
-		Offset: offset, Limit: limit})
+		Sort: q.Get("sort"), Order: q.Get("order"), Offset: offset, Limit: limit})
 	writeJSON(w, 200, map[string]any{
 		"summary": s.jobs.Summary(), "counts": s.jobs.Counts(), "count": count, "items": items,
 	})
@@ -724,14 +724,16 @@ func (s *Server) folders(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
-	counts, list := s.jobs.Folders(jobs.Q{Filter: filter, Site: q.Get("site"), Text: q.Get("q")})
+	counts, list := s.jobs.Folders(jobs.Q{Filter: filter, Site: q.Get("site"), Text: q.Get("q"),
+		Sort: q.Get("sort"), Order: q.Get("order")})
 	total := len(list)
 	if offset > total {
 		offset = total
 	}
 	end := min(total, offset+limit)
 	writeJSON(w, 200, map[string]any{
-		"summary": s.jobs.Summary(), "counts": counts, "count": total, "items": list[offset:end],
+		"summary": s.jobs.Summary(), "counts": counts, "totals": s.jobs.FolderTotals(), "count": total,
+		"items": list[offset:end],
 	})
 }
 

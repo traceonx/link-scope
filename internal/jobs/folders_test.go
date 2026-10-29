@@ -61,3 +61,38 @@ func TestBuildFolders(t *testing.T) {
 		t.Errorf("删除后文件夹数 %d", len(l))
 	}
 }
+
+func TestFolderTotalsAndSort(t *testing.T) {
+	r := &scanner.Result{Summary: scanner.Summary{Source: "/dl"}, Items: []scanner.Item{
+		{Type: "file", Path: "/dl/A/a.mkv", Name: "a.mkv", Size: 10, Mtime: 3, Linked: true, Nlink: 2, Tags: []string{"linked"}},
+		{Type: "file", Path: "/dl/B/b1.mkv", Name: "b1.mkv", Size: 30, Mtime: 1, Linked: true, Nlink: 2, Tags: []string{"linked"}},
+		{Type: "file", Path: "/dl/B/b2.mkv", Name: "b2.mkv", Size: 5, Mtime: 2, Nlink: 1, Tags: []string{"unlinked"}},
+		{Type: "file", Path: "/dl/C/c.mkv", Name: "c.mkv", Size: 20, Mtime: 4, Nlink: 1, Tags: []string{"unlinked"}},
+	}}
+	m := &Manager{}
+	m.setResult(r)
+	tt := m.FolderTotals()
+	if tt.Folders != 3 || tt.PendingFolders != 2 || tt.PendingFiles != 2 || tt.PendingSize != 25 || tt.DoneFolders != 1 || tt.UnlinkedFolders != 1 {
+		t.Errorf("totals: %+v", tt)
+	}
+	_, l := m.Folders(Q{Sort: "pending", Order: "desc"})
+	if l[0].Name != "C" || l[1].Name != "B" || l[2].Name != "A" {
+		t.Errorf("按待清理大小排序: %s %s %s", l[0].Name, l[1].Name, l[2].Name)
+	}
+	_, l = m.Folders(Q{Sort: "name", Order: "desc"})
+	if l[0].Name != "C" {
+		t.Errorf("按名称倒序: %s", l[0].Name)
+	}
+	n, items := m.Query(Q{Sort: "size", Order: "desc", Limit: 2})
+	if n != 4 || len(items) != 2 || items[0].Size != 30 || items[1].Size != 20 {
+		t.Errorf("文件按大小排序分页: %d %+v", n, items)
+	}
+	_, items = m.Query(Q{Sort: "mtime", Offset: 3, Limit: 2})
+	if len(items) != 1 || items[0].Mtime != 4 {
+		t.Errorf("排序后偏移: %+v", items)
+	}
+	_, items = m.Query(Q{Filter: "unlinked", Sort: "size"})
+	if len(items) != 2 || items[0].Size != 5 {
+		t.Errorf("筛选+排序: %+v", items)
+	}
+}

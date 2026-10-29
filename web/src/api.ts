@@ -49,15 +49,15 @@ export const api = {
   scan: (body: ScanRequest) => request<{ ok: boolean }>('api/scan', { method: 'POST', body: JSON.stringify(body) }),
   cancel: () => request<{ ok: boolean }>('api/scan/cancel', { method: 'POST' }),
   status: () => request<{ state: JobState; summary: Summary | null }>('api/status'),
-  result: (filter: Filter, site: string, q: string, offset: number, limit: number, dir = '') =>
+  result: (filter: Filter, site: string, q: string, offset: number, limit: number, dir = '', sort = '', order = '') =>
     request<ResultPage>(
-      `api/result?filter=${filter}&site=${encodeURIComponent(site)}&q=${encodeURIComponent(q)}&dir=${encodeURIComponent(dir)}&offset=${offset}&limit=${limit}`,
+      `api/result?filter=${filter}&site=${encodeURIComponent(site)}&q=${encodeURIComponent(q)}&dir=${encodeURIComponent(dir)}&sort=${sort}&order=${order}&offset=${offset}&limit=${limit}`,
     ),
   exportUrl: (filter: Filter, site: string, q: string, dir = '') =>
     `api/export.csv?filter=${filter}&site=${encodeURIComponent(site)}&q=${encodeURIComponent(q)}&dir=${encodeURIComponent(dir)}`,
-  folders: (filter: FolderFilter, site: string, q: string, offset: number, limit: number) =>
+  folders: (filter: FolderFilter, site: string, q: string, offset: number, limit: number, sort = '', order = '') =>
     request<FolderPage>(
-      `api/folders?filter=${filter}&site=${encodeURIComponent(site)}&q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}`,
+      `api/folders?filter=${filter}&site=${encodeURIComponent(site)}&q=${encodeURIComponent(q)}&sort=${sort}&order=${order}&offset=${offset}&limit=${limit}`,
     ),
   foldersExportUrl: (filter: FolderFilter, site: string, q: string) =>
     `api/folders.csv?filter=${filter}&site=${encodeURIComponent(site)}&q=${encodeURIComponent(q)}`,

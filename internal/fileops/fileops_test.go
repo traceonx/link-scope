@@ -138,3 +138,58 @@ func TestPermanentAndExpire(t *testing.T) {
 		t.Errorf("过期清理数量 %d", n)
 	}
 }
+
+// 模拟 Btrfs 子卷：root/sub 及其下层是另一个设备号
+func TestTrashInSubvolume(t *testing.T) {
+	root, m := setup(t)
+	sub := filepath.Join(root, "sub")
+	f := filepath.Join(sub, "dl", "x.mkv")
+	if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(f, []byte("x"), 0o644)
+	orig := devOf
+	defer func() { devOf = orig }()
+	devOf = func(p string) (uint64, error) {
+		if within(p, sub) {
+			return 2, nil
+		}
+		return 1, nil
+	}
+	if b := trashBase(f, root); b != sub {
+		t.Fatalf("回收站应放在子卷顶层 %s，实际 %s", sub, b)
+	}
+	if _, done, err := m.Delete([]string{f}, false); err != nil || len(done) != 1 {
+		t.Fatalf("移入回收站失败: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sub, TrashDir)); err != nil {
+		t.Error("子卷内应创建回收站目录")
+	}
+	devOf = orig
+	// 重新创建管理器后仍能找到子卷里的回收站条目
+	m2 := New([]string{root}, filepath.Join(root, "data"), 30, false)
+	tr := m2.Trash()
+	if len(tr) != 1 || tr[0].Path != f {
+		t.Fatalf("回收站列表: %+v", tr)
+	}
+	if rr, _ := m2.Restore([]string{tr[0].ID}); !rr[0].OK {
+		t.Errorf("恢复失败: %+v", rr)
+	}
+}
+
+// 永久删除不经过回收站，即使文件和回收站跨子卷也应成功
+func TestPermanentIgnoresTrashDevice(t *testing.T) {
+	root, m := setup(t)
+	orig := devOf
+	defer func() { devOf = orig }()
+	n := uint64(0)
+	devOf = func(string) (uint64, error) { n++; return n, nil } // 每个目录都是不同设备
+	dir := filepath.Join(root, "dl", "show")
+	res, done, err := m.Delete([]string{dir}, true)
+	if err != nil || len(done) != 1 || !res[0].OK {
+		t.Fatalf("永久删除文件夹失败：%v %+v", err, res)
+	}
+	if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+		t.Error("文件夹应已删除")
+	}
+}

@@ -1,6 +1,6 @@
 # LinkScope · 链接透视
 
-运行在 NAS 上的轻量链接检测工具：一眼看清哪些文件已硬链接、链接到了哪里、哪些还没整理、哪些被重复复制占用空间、失效的软链接和 STRM，以及每个文件的做种状态和来源站点，并可安全地删除清理。单文件、低内存，Docker 一键部署，为飞牛 fnOS 优化。
+运行在 NAS 上的下载目录清理工具：qBittorrent 下载、MoviePilot 用硬链接整理到媒体库后，总有一些文件因为识别失败、整理失败等原因留在下载目录里白占空间。LinkScope 找出这些**没被媒体库用上的游离文件**，按文件夹列出、统计占用空间，并安全地清理（回收站可恢复）；连接下载器后还能看到做种状态和 PT 站点。单文件、低内存，Docker 一键部署，为飞牛 fnOS 优化。
 
 ## 能检测什么
 
@@ -15,7 +15,7 @@
 | **站点已删种** | Tracker 返回「未注册 / 种子不存在」等错误的种子 |
 | **孤儿文件** | 在下载目录里，但不属于任何种子的文件 |
 
-结果可以**按文件夹**（默认）或**按文件**查看。按文件夹时，检测目录下的每个一级子文件夹是一行：里面有文件被硬链接即为「已链接」，并区分全部链接 / 部分链接 / 未链接；点开文件夹可看到其中每个文件，再点文件查看完整的链接详情。
+结果可以**按文件夹**（默认）或**按文件**查看。按文件夹时，下载目录下的每个一级子文件夹是一行，状态为 **待清理**（没有任何文件被整理到媒体库）、**部分游离**（部分文件已整理）或 **已整理**；默认显示「待清理」并按游离大小从大到小排序。点开文件夹可看到其中每个文件，再点文件查看详情。
 
 重复比对有两种方式：**抽样**（默认，只读每个文件的头、中、尾各 1 MB，速度快）和**完整**（读完整个文件，最准确但慢）。只有大小完全相同的文件才会被比对。
 
@@ -25,7 +25,7 @@
 
 - **删除前预览**：数量、大小和**实际释放空间**。硬链接要所有路径都删掉才释放空间，只删其中一个路径时会明确提示
 - **做种提醒**：连接了下载器时，若文件仍在做种，会提示来自哪些站点，避免 H&R
-- **回收站**：默认移到所在存储空间根目录的 `.linkscope-trash`（同盘改名，瞬间完成），右上角「回收站」可恢复或清空，`LS_TRASH_DAYS` 天后自动清除；勾选「永久删除」并输入「删除」可直接删除
+- **回收站**：默认移到文件所在文件系统顶层的 `.linkscope-trash`（飞牛 Btrfs 下通常是 `/vol2/1000/.linkscope-trash` 这样的用户子卷目录；同盘改名，瞬间完成），右上角「回收站」可恢复或清空，`LS_TRASH_DAYS` 天后自动清除；勾选「永久删除」并输入「删除」可直接删除
 - **安全**：只能删除 `LS_ROOTS` 内的内容，不能删除根目录本身；媒体目录只读挂载（`:ro`）或 `LS_DELETE=false` 时不显示删除功能；每次操作记录在 `data/delete.log`
 
 ## 站点种子检测
@@ -135,9 +135,9 @@ scripts/            独立的命令行检测脚本（Python，无需部署）
 | POST | `/api/scan` | 开始扫描 `{source, targets, recursive, min_size_mb, dup_mode}` |
 | POST | `/api/scan/cancel` | 取消扫描 |
 | GET | `/api/status` | 进度和上次扫描汇总 |
-| GET | `/api/result?filter=&site=&q=&dir=&offset=&limit=` | 分页结果；filter：all / linked / unlinked / dup / symlink / strm / broken / torrent / seeding / unregistered / orphan |
+| GET | `/api/result?filter=&site=&q=&dir=&sort=&order=&offset=&limit=` | 分页结果；filter：all / linked / unlinked / dup / symlink / strm / broken / torrent / seeding / unregistered / orphan |
 | GET | `/api/export.csv?filter=&site=&q=&dir=` | 导出 CSV（Excel 可直接打开） |
-| GET | `/api/folders?filter=&site=&q=&offset=&limit=`、`/api/folders.csv` | 文件夹视图；filter：all / linked / full / partial / unlinked / dup / seeding / unregistered / orphan |
+| GET | `/api/folders?filter=&site=&q=&sort=&order=&offset=&limit=`、`/api/folders.csv` | 文件夹视图；filter：all / linked / full / partial / unlinked / dup / seeding / unregistered / orphan |
 | POST | `/api/delete/preview`、`/api/delete` | 删除预览 / 删除 `{paths}`、`{filter, site, q, dir}` 或 `{view: "folders", filter, site, q}`，`permanent` |
 | GET / POST | `/api/trash`、`/api/trash/restore`、`/api/trash/purge` | 回收站列表 / 恢复 / 永久删除 |
 | GET / POST / DELETE | `/api/downloaders`、`/api/downloaders/test`、`/api/downloaders/{id}` | 下载器配置 |

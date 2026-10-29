@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { NButton, NCheckbox, NInput, NModal, NSpin, useMessage } from 'naive-ui'
+import { NButton, NCheckbox, NInput, NModal, NSpin } from 'naive-ui'
 import Icon from './Icon.vue'
 import { api } from '../api'
 import { fmtCount, fmtSize } from '../format'
@@ -8,7 +8,6 @@ import type { DeletePreview, DeleteResult, DeleteTarget } from '../types'
 
 const props = defineProps<{ show: boolean; target: DeleteTarget | null; title?: string }>()
 const emit = defineEmits<{ (e: 'update:show', v: boolean): void; (e: 'done', r: DeleteResult): void }>()
-const message = useMessage()
 
 const preview = ref<DeletePreview | null>(null)
 const loading = ref(false)
@@ -16,6 +15,8 @@ const deleting = ref(false)
 const error = ref('')
 const permanent = ref(false)
 const confirmText = ref('')
+const expanded = ref(false)
+const result = ref<DeleteResult | null>(null)
 
 watch(
   () => props.show,
@@ -25,6 +26,8 @@ watch(
     error.value = ''
     permanent.value = false
     confirmText.value = ''
+    expanded.value = false
+    result.value = null
     loading.value = true
     try {
       preview.value = await api.deletePreview(props.target)
@@ -37,25 +40,29 @@ watch(
 )
 
 const pv = computed(() => preview.value?.preview)
+const valid = computed(() => (pv.value ? pv.value.count - pv.value.errors : 0))
 const canConfirm = computed(
-  () => !!pv.value && pv.value.count > pv.value.errors && (!permanent.value || confirmText.value.trim() === '删除'),
+  () => !!pv.value && valid.value > 0 && !deleting.value && (!permanent.value || confirmText.value.trim() === '删除'),
 )
+const shown = computed(() => (pv.value ? (expanded.value ? pv.value.items : pv.value.items.slice(0, 20)) : []))
+const skipped = computed(() => pv.value?.items.filter((x) => x.error) ?? [])
 const kindLabel = { file: '文件', dir: '文件夹', symlink: '软链接', '': '' } as const
 
 async function run() {
-  if (!props.target) return
+  if (!props.target || !canConfirm.value) return
   deleting.value = true
   try {
-    const r = await api.deletePaths(props.target, permanent.value)
-    if (r.failed) message.warning(`已删除 ${r.deleted} 项，${r.failed} 项失败：${r.errors[0]?.error ?? ''}`)
-    else message.success(permanent.value ? `已永久删除 ${r.deleted} 项` : `已移到回收站 ${r.deleted} 项`)
-    emit('done', r)
-    emit('update:show', false)
+    result.value = await api.deletePaths(props.target, permanent.value)
+    emit('done', result.value)
   } catch (e) {
-    message.error((e as Error).message)
+    error.value = (e as Error).message
   } finally {
     deleting.value = false
   }
+}
+
+function close() {
+  if (!deleting.value) emit('update:show', false)
 }
 </script>
 
@@ -63,79 +70,117 @@ async function run() {
   <NModal
     :show="show"
     preset="card"
-    :title="title ?? '删除'"
-    style="width: min(600px, calc(100vw - 24px))"
+    :title="result ? '清理完成' : (title ?? '清理')"
+    style="width: min(620px, calc(100vw - 16px))"
     :bordered="false"
     :mask-closable="!deleting"
     :closable="!deleting"
-    @update:show="(v: boolean) => emit('update:show', v)"
+    @update:show="(v: boolean) => !v && close()"
   >
-    <NSpin :show="loading">
+    <!-- 结果 -->
+    <div v-if="result" class="del">
+      <div class="sum">
+        <div><span>成功</span><b class="c-blue">{{ fmtCount(result.deleted) }} 项</b></div>
+        <div><span>失败</span><b :class="result.failed ? 'c-red' : ''">{{ fmtCount(result.failed) }} 项</b></div>
+        <div><span>跳过</span><b>{{ fmtCount(skipped.length) }} 项</b></div>
+        <div>
+          <span>{{ permanent ? '已释放' : '清空回收站后释放' }}</span>
+          <b>{{ fmtSize(pv?.freed ?? 0) }}</b>
+        </div>
+      </div>
+      <div v-if="result.errors.length" class="notice notice-err col">
+        <b>失败原因</b>
+        <span v-for="e in result.errors.slice(0, 10)" :key="e.path" class="small">
+          <span class="mono">{{ e.path }}</span>：{{ e.error }}
+        </span>
+      </div>
+      <div v-if="!permanent && result.deleted" class="muted small">
+        已移入回收站，可以在右上角「回收站」中恢复；{{ preview?.trash_days }} 天后自动清除。
+      </div>
+      <div class="muted small">统计数字已按删除结果估算，建议稍后重新扫描。</div>
+    </div>
+
+    <!-- 预览 -->
+    <NSpin v-else :show="loading">
       <div class="del">
         <div v-if="error" class="notice notice-err">{{ error }}</div>
         <template v-if="pv">
           <div class="sum">
-            <div><span>数量</span><b>{{ fmtCount(pv.count - pv.errors) }} 项</b></div>
+            <div><span>清理项目</span><b>{{ fmtCount(valid) }} 项</b></div>
             <div><span>包含文件</span><b>{{ fmtCount(pv.files) }} 个</b></div>
             <div><span>总大小</span><b>{{ fmtSize(pv.total_size) }}</b></div>
-            <div><span>实际释放</span><b :class="pv.freed ? 'c-green' : 'muted'">{{ fmtSize(pv.freed) }}</b></div>
+            <div><span>预计释放</span><b class="c-green">{{ fmtSize(pv.freed) }}</b></div>
           </div>
 
-          <div v-if="preview!.seeding.files" class="notice notice-err">
+          <div v-if="preview!.seeding.files" class="notice notice-seed">
             <Icon name="seed" :size="18" />
             <span>
-              其中 <b>{{ preview!.seeding.files }}</b> 个文件仍在做种（{{ preview!.seeding.sites.join('、') }}）。
-              删除后种子会出错，可能被站点判为 H&amp;R；建议先在下载器里停止或删除种子。
+              {{ preview!.seeding.files }} 个文件仍在做种（{{ preview!.seeding.sites.join('、') }}）。
+              如未满足保种要求，删除后可能被站点判为 H&amp;R。
             </span>
           </div>
-          <div v-if="pv.kept" class="notice notice-warn">
-            <Icon name="link" :size="18" />
-            <span>
-              {{ pv.kept }} 个文件在其他位置还有硬链接（共 {{ fmtSize(pv.kept_size) }}），删除这里的路径不会释放空间，
-              其他位置的文件不受影响。
-            </span>
+          <div v-if="pv.kept" class="muted small">
+            其中 {{ pv.kept }} 个文件在媒体库中仍有硬链接（{{ fmtSize(pv.kept_size) }}），删除这里不影响媒体库，也不释放这部分空间。
           </div>
-          <div v-if="!permanent" class="muted small">
-            移到回收站后可以恢复；空间要在清空回收站后才释放，{{ preview!.trash_days }} 天后自动清除。
+          <div v-if="skipped.length" class="notice notice-warn col">
+            <b>{{ skipped.length }} 项将被跳过</b>
+            <span v-for="s in skipped.slice(0, 5)" :key="s.path" class="small"><span class="mono">{{ s.path }}</span>：{{ s.error }}</span>
           </div>
 
           <div class="list">
-            <div v-for="it in pv.items" :key="it.path" class="row" :class="{ bad: it.error }">
+            <div v-for="it in shown" :key="it.path" class="row" :class="{ bad: it.error }">
               <span class="badge" :class="it.error ? 'badge-red' : 'badge-gray'">{{ it.error ? '跳过' : kindLabel[it.kind] }}</span>
               <span class="mono path">{{ it.path }}</span>
               <span class="meta">
-                <template v-if="it.error">{{ it.error }}</template>
-                <template v-else-if="it.kind === 'dir'">{{ it.files }} 个文件 · {{ fmtSize(it.size) }}</template>
-                <template v-else-if="it.kind === 'file'">
-                  {{ fmtSize(it.size) }}<template v-if="!it.freed"> · 其他位置还有链接</template>
-                </template>
+                <template v-if="it.kind === 'dir'">{{ it.files }} 个文件 · </template>{{ it.size ? fmtSize(it.size) : '' }}
               </span>
             </div>
-            <div v-if="pv.count > pv.items.length" class="muted small more">
-              还有 {{ fmtCount(pv.count - pv.items.length) }} 项未列出
+            <button
+              v-if="pv.items.length > 20 && !expanded"
+              type="button"
+              class="more"
+              @click="expanded = true"
+            >
+              展开全部 {{ pv.items.length }} 项
+            </button>
+            <div v-if="pv.count > pv.items.length" class="muted small more-note">
+              另有 {{ fmtCount(pv.count - pv.items.length) }} 项未列出
             </div>
           </div>
 
-          <div class="perm">
-            <NCheckbox v-model:checked="permanent">永久删除（不进回收站，无法恢复）</NCheckbox>
-            <NInput
-              v-if="permanent"
-              v-model:value="confirmText"
-              placeholder="输入「删除」确认"
-              :input-props="{ 'aria-label': '输入删除确认' }"
-              style="max-width: 220px"
-            />
+          <div class="mode">
+            <div class="mode-text">
+              <b>{{ permanent ? '永久删除' : '移入回收站' }}</b>
+              <span class="muted small">
+                <template v-if="permanent">立即删除，无法恢复。</template>
+                <template v-else>可在回收站恢复；清空回收站后才真正释放空间，{{ preview!.trash_days }} 天后自动清除。</template>
+              </span>
+            </div>
+            <NCheckbox v-model:checked="permanent">永久删除</NCheckbox>
           </div>
+          <NInput
+            v-if="permanent"
+            v-model:value="confirmText"
+            placeholder="输入「删除」确认永久删除"
+            :input-props="{ 'aria-label': '输入删除确认' }"
+            status="error"
+          />
         </template>
       </div>
     </NSpin>
+
     <template #footer>
       <div class="foot">
-        <NButton :disabled="deleting" @click="emit('update:show', false)">取消</NButton>
-        <NButton type="error" :disabled="!canConfirm" :loading="deleting" @click="run">
-          <template #icon><Icon name="trash" /></template>
-          {{ permanent ? '永久删除' : '移到回收站' }}
-        </NButton>
+        <template v-if="result">
+          <NButton type="primary" @click="close">完成</NButton>
+        </template>
+        <template v-else>
+          <NButton :disabled="deleting" @click="close">取消</NButton>
+          <NButton type="error" :secondary="!permanent" :disabled="!canConfirm" :loading="deleting" @click="run">
+            <template #icon><Icon name="trash" /></template>
+            {{ permanent ? '永久删除' : '移入回收站' }}{{ valid ? ` ${fmtCount(valid)} 项` : '' }}
+          </NButton>
+        </template>
       </div>
     </template>
   </NModal>
@@ -144,19 +189,25 @@ async function run() {
 <style scoped>
 .del { display: flex; flex-direction: column; gap: 12px; min-height: 80px; }
 .sum { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 14px; border-radius: 8px; background: var(--soft); }
-.sum div { display: flex; flex-direction: column; gap: 2px; }
+.sum div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .sum span { font-size: 12px; color: var(--ink-2); }
 .sum b { font-size: 15px; }
 .c-green { color: var(--green-ink); }
-.small { font-size: 13px; }
-.list { max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+.c-blue { color: var(--blue-ink); }
+.c-red { color: var(--red-ink); }
+.notice-seed { background: var(--green-bg); color: var(--green-ink); }
+.col { flex-direction: column; gap: 4px; }
+.small { font-size: 12px; }
+.list { max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
-.row:last-child { border-bottom: 0; }
 .path { flex: 1 1 260px; min-width: 0; font-size: 12px; word-break: break-all; }
 .meta { font-size: 12px; color: var(--ink-2); }
 .row.bad .path { color: var(--ink-2); text-decoration: line-through; }
-.more { padding: 8px 12px; }
-.perm { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.more { width: 100%; padding: 8px; border: 0; background: transparent; color: var(--blue); font: inherit; font-size: 13px; cursor: pointer; }
+.more:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.more-note { padding: 8px 12px; }
+.mode { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; }
+.mode-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 260px; }
 .foot { display: flex; justify-content: flex-end; gap: 8px; }
-@media (max-width: 640px) { .sum { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .sum { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>

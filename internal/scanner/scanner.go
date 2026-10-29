@@ -110,28 +110,30 @@ type SiteStat struct {
 
 // Summary 扫描汇总。
 type Summary struct {
-	Source      string   `json:"source"`
-	Targets     []string `json:"targets"`
-	Recursive   bool     `json:"recursive"`
-	MinSize     int64    `json:"min_size"`
-	DupMode     DupMode  `json:"dup_mode"`
-	Total       int      `json:"total"`
-	TotalSize   int64    `json:"total_size"`
-	Linked      int      `json:"linked"`
-	Unlinked    int      `json:"unlinked"`
-	Saved       int64    `json:"saved"`
-	DupFiles    int      `json:"dup_files"`
-	DupGroups   int      `json:"dup_groups"`
-	DupWasted   int64    `json:"dup_wasted"`
-	Symlinks    int      `json:"symlinks"`
-	BrokenLinks int      `json:"broken_links"`
-	Strm        int      `json:"strm"`
-	BrokenStrm  int      `json:"broken_strm"`
-	ScannedAt   int64    `json:"scanned_at"`
-	Duration    float64  `json:"duration"`
-	Warnings    []string `json:"warnings"`
-	Errors      []string `json:"errors"`
-	ErrorCount  int      `json:"error_count"`
+	Source       string   `json:"source"`
+	Targets      []string `json:"targets"`
+	Recursive    bool     `json:"recursive"`
+	MinSize      int64    `json:"min_size"`
+	DupMode      DupMode  `json:"dup_mode"`
+	Total        int      `json:"total"`
+	TotalSize    int64    `json:"total_size"`
+	LinkedSize   int64    `json:"linked_size"`   // 已链接（已整理）文件的大小
+	UnlinkedSize int64    `json:"unlinked_size"` // 未链接（待清理）文件的大小
+	Linked       int      `json:"linked"`
+	Unlinked     int      `json:"unlinked"`
+	Saved        int64    `json:"saved"`
+	DupFiles     int      `json:"dup_files"`
+	DupGroups    int      `json:"dup_groups"`
+	DupWasted    int64    `json:"dup_wasted"`
+	Symlinks     int      `json:"symlinks"`
+	BrokenLinks  int      `json:"broken_links"`
+	Strm         int      `json:"strm"`
+	BrokenStrm   int      `json:"broken_strm"`
+	ScannedAt    int64    `json:"scanned_at"`
+	Duration     float64  `json:"duration"`
+	Warnings     []string `json:"warnings"`
+	Errors       []string `json:"errors"`
+	ErrorCount   int      `json:"error_count"`
 	// Stale：扫描后有文件被删除或恢复，统计为估算，建议重新扫描
 	Stale    bool            `json:"stale,omitempty"`
 	Torrents *TorrentSummary `json:"torrents,omitempty"`
@@ -410,9 +412,11 @@ func Scan(ctx context.Context, o Options) (*Result, error) {
 		if it.Linked {
 			it.Tags = []string{"linked"}
 			s.Linked++
+			s.LinkedSize += e.size
 			s.Saved += e.size * int64(e.nlink-1)
 		} else {
 			it.Tags = []string{"unlinked"}
+			s.UnlinkedSize += e.size
 		}
 		if len(it.Dups) > 0 {
 			it.Tags = append(it.Tags, "dup")

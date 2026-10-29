@@ -148,7 +148,80 @@ func buildFolders(r *scanner.Result) []Folder {
 	return keep
 }
 
-// Folders 返回各筛选项的数量和过滤后的文件夹列表。
+// FolderTotals 是待清理（含未链接文件）文件夹的汇总，不受筛选影响。
+type FolderTotals struct {
+	Folders         int   `json:"folders"`          // 文件夹总数
+	PendingFolders  int   `json:"pending_folders"`  // 含未链接文件的文件夹数（未链接 + 部分链接）
+	UnlinkedFolders int   `json:"unlinked_folders"` // 完全未链接的文件夹数
+	PendingFiles    int   `json:"pending_files"`    // 未链接文件数
+	PendingSize     int64 `json:"pending_size"`     // 未链接文件大小
+	DoneFolders     int   `json:"done_folders"`     // 全部链接的文件夹数
+}
+
+// FolderTotals 返回文件夹汇总。
+func (m *Manager) FolderTotals() FolderTotals {
+	m.mu.Lock()
+	if m.result != nil && m.folders == nil {
+		m.folders = buildFolders(m.result)
+	}
+	all := m.folders
+	m.mu.Unlock()
+	var t FolderTotals
+	for i := range all {
+		f := &all[i]
+		t.Folders++
+		if f.Unlinked > 0 {
+			t.PendingFolders++
+			t.PendingFiles += f.Unlinked
+			t.PendingSize += f.Size - f.LinkedSize
+			if f.Linked == 0 {
+				t.UnlinkedFolders++
+			}
+		} else if f.Status == "linked" {
+			t.DoneFolders++
+		}
+	}
+	return t
+}
+
+// sortFolders 按字段排序；未知字段按名称。
+func sortFolders(list []Folder, by, order string) {
+	desc := order == "desc"
+	key := func(f *Folder) int64 {
+		switch by {
+		case "size":
+			return f.Size
+		case "pending":
+			return f.Size - f.LinkedSize
+		case "files":
+			return int64(f.Files)
+		case "unlinked":
+			return int64(f.Unlinked)
+		case "mtime":
+			return f.Mtime
+		}
+		return 0
+	}
+	sort.SliceStable(list, func(i, j int) bool {
+		a, b := &list[i], &list[j]
+		if by == "" || by == "name" {
+			if desc {
+				return strings.ToLower(a.Name) > strings.ToLower(b.Name)
+			}
+			return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+		}
+		ka, kb := key(a), key(b)
+		if ka == kb {
+			return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+		}
+		if desc {
+			return ka > kb
+		}
+		return ka < kb
+	})
+}
+
+// Folders 返回各筛选项的数量和过滤、排序后的文件夹列表。
 func (m *Manager) Folders(o Q) (map[string]int, []Folder) {
 	counts := make(map[string]int, len(FolderFilters))
 	for _, f := range FolderFilters {
@@ -184,6 +257,9 @@ func (m *Manager) Folders(o Q) (map[string]int, []Folder) {
 			continue
 		}
 		out = append(out, *f)
+	}
+	if o.Sort != "" {
+		sortFolders(out, o.Sort, o.Order)
 	}
 	return counts, out
 }
