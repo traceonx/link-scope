@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { NButton, NCheckbox, NInput, NModal, NSpin } from 'naive-ui'
+import { NButton, NCheckbox, NModal, NSpin, useDialog } from 'naive-ui'
 import Icon from './Icon.vue'
 import { api } from '../api'
 import { fmtCount, fmtSize } from '../format'
@@ -14,7 +14,6 @@ const loading = ref(false)
 const deleting = ref(false)
 const error = ref('')
 const permanent = ref(false)
-const confirmText = ref('')
 const expanded = ref(false)
 const result = ref<DeleteResult | null>(null)
 
@@ -25,7 +24,6 @@ watch(
     preview.value = null
     error.value = ''
     permanent.value = false
-    confirmText.value = ''
     expanded.value = false
     result.value = null
     loading.value = true
@@ -42,11 +40,31 @@ watch(
 const pv = computed(() => preview.value?.preview)
 const valid = computed(() => (pv.value ? pv.value.count - pv.value.errors : 0))
 const canConfirm = computed(
-  () => !!pv.value && valid.value > 0 && !deleting.value && (!permanent.value || confirmText.value.trim() === '删除'),
+  () => !!pv.value && valid.value > 0 && !deleting.value,
 )
 const shown = computed(() => (pv.value ? (expanded.value ? pv.value.items : pv.value.items.slice(0, 20)) : []))
 const skipped = computed(() => pv.value?.items.filter((x) => x.error) ?? [])
 const kindLabel = { file: '文件', dir: '文件夹', symlink: '软链接', '': '' } as const
+
+const dialog = useDialog()
+
+function confirmRun() {
+  if (!canConfirm.value) return
+  if (!permanent.value) {
+    void run()
+    return
+  }
+  dialog.warning({
+    title: '确认彻底删除？',
+    content: `将彻底删除 ${fmtCount(valid.value)} 项（${fmtSize(pv.value?.total_size ?? 0)}），不进回收站，无法恢复。`,
+    positiveText: '彻底删除',
+    negativeText: '取消',
+    positiveButtonProps: { type: 'error' },
+    onPositiveClick: () => {
+      void run()
+    },
+  })
+}
 
 async function run() {
   if (!props.target || !canConfirm.value) return
@@ -150,21 +168,14 @@ function close() {
 
           <div class="mode">
             <div class="mode-text">
-              <b>{{ permanent ? '永久删除' : '移入回收站' }}</b>
+              <b>{{ permanent ? '彻底删除' : '移入回收站' }}</b>
               <span class="muted small">
-                <template v-if="permanent">立即删除，无法恢复。</template>
+                <template v-if="permanent">不进回收站，立即删除，无法恢复。点击删除后会再确认一次。</template>
                 <template v-else>可在回收站恢复；清空回收站后才真正释放空间，{{ preview!.trash_days }} 天后自动清除。</template>
               </span>
             </div>
-            <NCheckbox v-model:checked="permanent">永久删除</NCheckbox>
+            <NCheckbox v-model:checked="permanent">彻底删除</NCheckbox>
           </div>
-          <NInput
-            v-if="permanent"
-            v-model:value="confirmText"
-            placeholder="输入「删除」确认永久删除"
-            :input-props="{ 'aria-label': '输入删除确认' }"
-            status="error"
-          />
         </template>
       </div>
     </NSpin>
@@ -176,9 +187,9 @@ function close() {
         </template>
         <template v-else>
           <NButton :disabled="deleting" @click="close">取消</NButton>
-          <NButton type="error" :secondary="!permanent" :disabled="!canConfirm" :loading="deleting" @click="run">
+          <NButton type="error" :secondary="!permanent" :disabled="!canConfirm" :loading="deleting" @click="confirmRun">
             <template #icon><Icon name="trash" /></template>
-            {{ permanent ? '永久删除' : '移入回收站' }}{{ valid ? ` ${fmtCount(valid)} 项` : '' }}
+            {{ permanent ? '彻底删除' : '移入回收站' }}{{ valid ? ` ${fmtCount(valid)} 项` : '' }}
           </NButton>
         </template>
       </div>
