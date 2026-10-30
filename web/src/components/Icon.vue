@@ -2,24 +2,20 @@
 import { computed } from 'vue'
 import { iconPaths, type IconName } from '../icons'
 
-// 简单的线性图标，避免额外依赖
+// MDI 图标（实心路径，跟随文字颜色）
 const props = defineProps<{ name: string; size?: number }>()
-const ds = computed(() => iconPaths[props.name as IconName] ?? [])
+const d = computed(() => iconPaths[props.name as IconName] ?? '')
 </script>
 
 <template>
   <svg
-    :width="size ?? 16"
-    :height="size ?? 16"
+    :width="size ?? 18"
+    :height="size ?? 18"
     viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="2"
-    stroke-linecap="round"
-    stroke-linejoin="round"
+    fill="currentColor"
     aria-hidden="true"
     class="icon"
   >
-    <path v-for="(d, i) in ds" :key="i" :d="d" />
+    <path :d="d" />
   </svg>
 </template>

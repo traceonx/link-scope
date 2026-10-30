@@ -21,10 +21,14 @@ LinkScope · 链接透视：运行在 NAS（飞牛 fnOS）上的下载目录清�
 
 ## 前端规范（web/）
 
-- 目录：`components/` 组件，`views/Home.vue` 唯一页面（无路由、无 Pinia），`api.ts` 接口，`types.ts` 类型，`format.ts` / `badges.ts` 工具，`prefs.ts` 浏览器本地偏好（主题、默认视图、扫描预设），`style.css` 全局变量。
-- 主要组件：AppHeader、ScanPanel（扫描设置 / 预设 / 进度）、StatsOverview（待清理主卡片）、SiteOverview、FolderTable / ResultTable（远程分页 + 排序）、DetailDrawer（FolderDetail / FileDetail）、BulkBar、DeleteDialog（预览 → 确认 → 结果）、TrashModal、DownloaderModal、UpdateModal、SettingsModal。
+界面风格参考 MoviePilot（Vuetify / Materio 后台模板）：左侧导航 + 顶部应用栏 + 卡片。组件库仍用 Naive UI（不引入 Vuetify），图标用 `@mdi/js`（按名称引入，打包只含用到的图标）。
+
+- 目录：`components/` 组件，`views/` 页面（DashboardView 仪表盘、ScanView 扫描、ResultsView 清理结果、DownloadersView 下载器、TrashView 回收站、SettingsView 设置），`router.ts` 极简 hash 路由（`#/results`、`#/settings/update`，无 vue-router），`store.ts` 全局单例状态（配置、扫描任务、结果筛选、勾选、详情、删除；无 Pinia），`api.ts` 接口，`types.ts` 类型，`format.ts` / `badges.ts` 工具，`prefs.ts` 浏览器本地偏好（主题、默认视图、扫描预设、扫描表单草稿），`icons.ts` MDI 图标表，`style.css` 全局变量与通用样式（`.card` / `.card-head` / `.avatar` / `.set-row` 等）。
+- 布局：`AppRoot.vue` 用 `<KeepAlive>` 缓存各页面（切换不丢状态，页面内需要刷新的用 `onActivated`）；`AppLayout.vue` 是导航与应用栏；删除对话框 `DeleteDialog` 挂在根组件，任何页面通过 `store.askDelete` / `deletePaths` 发起。新增页面时在 `router.ts` 的 `pages` 与 `AppRoot.vue` 的 `views` 中登记。
+- 主要组件：AppLayout、FolderTable / ResultTable（远程分页 + 排序）、DetailDrawer（FolderDetail / FileDetail）、BulkBar、DeleteDialog（预览 → 确认 → 结果）、FolderPicker、UpdatePanel。
 - 主题：`index.html` 在首屏前读取 `localStorage['ls.theme']` 设置 `data-theme`；深色变量在 `style.css` 中同时写给 `prefers-color-scheme` 与 `[data-theme="dark"]`。
-- 颜色只用 `style.css` 里的 CSS 变量（已含深色模式），不写死颜色；Naive UI 主题在 `App.vue` 的 themeOverrides。
-- 弹窗用 `NModal preset="card"`，确认操作用 `useDialog()`，提示用 `useMessage()`，不用原生 alert / confirm。
+- 颜色只用 `style.css` 里的 CSS 变量（已含深色模式），不写死颜色；主色 `--primary`（#9155FD）用于导航选中、主按钮、焦点框、选中行。Naive UI 主题在 `App.vue` 的 themeOverrides（色值与 style.css 保持一致）。
+- 卡片无边框、靠 `--shadow` 分层；页面内容用 `.page`（纵向间距 22px）与 `.grid-2`；网格列写 `minmax(0, 1fr)`，避免长路径把手机页面撑宽。
+- 弹窗用 `NModal preset="card"`，确认操作用 `useDialog()`，提示用 `useMessage()`，不用原生 alert / confirm。设置类内容用分组卡片或标签页，不要堆成一个长表单。
 - 状态颜色：已整理 蓝、待清理 橙、部分游离 / 重复副本 紫、STRM 青、失效 / 已删种 / 危险操作 红、做种中 绿、孤儿文件 橙；颜色之外还需有文字标签。
 - NAS 局域网多为 http，复制到剪贴板要用 `format.ts` 的 `copyText`（含降级方案）。

@@ -207,7 +207,7 @@ function onSorter(s: DataTableSortState | DataTableSortState[] | null) {
 :deep(.cell-dir) { font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :deep(.cell-nlink) { font-weight: 600; color: var(--ink-2); }
 :deep(.cell-nlink.on) { color: var(--blue-ink); }
-:deep(.row-selected td) { background: var(--blue-row) !important; }
-:deep(.row-selected td:first-child) { box-shadow: inset 3px 0 0 var(--blue); }
-:deep(tr:focus-visible td) { outline: 2px solid var(--blue); outline-offset: -2px; }
+:deep(.row-selected td) { background: var(--primary-row) !important; }
+:deep(.row-selected td:first-child) { box-shadow: inset 3px 0 0 var(--primary); }
+:deep(tr:focus-visible td) { outline: 2px solid var(--primary); outline-offset: -2px; }
 </style>
