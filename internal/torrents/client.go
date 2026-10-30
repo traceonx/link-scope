@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -71,7 +72,27 @@ func (d *Downloader) mapPath(p string) string {
 	return out
 }
 
+// pathExists 判断本工具（容器内）能否看到该路径；测试中可替换。
+var pathExists = func(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// fixMappings 纠正填反的映射：若「下载器路径」在本工具中存在、而「本工具路径」不存在，
+// 说明两边填反了（常见于 /vol2/1000/xxx → /xxx），自动交换。返回新切片，不修改原配置。
+func fixMappings(ms []Mapping) []Mapping {
+	out := make([]Mapping, len(ms))
+	for i, m := range ms {
+		if m.From != "" && m.To != "" && !pathExists(m.To) && pathExists(m.From) {
+			m.From, m.To = m.To, m.From
+		}
+		out[i] = m
+	}
+	return out
+}
+
 func newClient(d *Downloader) (client, error) {
+	d.Mappings = fixMappings(d.Mappings)
 	switch d.Type {
 	case "qbittorrent":
 		jar, _ := cookiejar.New(nil)

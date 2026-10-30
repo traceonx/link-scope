@@ -163,11 +163,18 @@ function clientError(name: string) {
           <NEmpty v-if="!loading && !list.length" description="还没有添加下载器" style="padding: 32px 0" />
         </div>
       </NSpin>
-      <div v-if="summary" class="muted small">
-        上次读取种子：{{ fmtTime(summary.fetched_at) }} ·
-        <template v-for="(c, i) in summary.clients" :key="c.name">
-          {{ i ? '，' : '' }}{{ c.name }} {{ c.ok ? `${c.torrents} 个种子` : '失败' }}
-        </template>
+      <div v-if="summary" class="clients">
+        <span class="muted small">上次读取种子：{{ fmtTime(summary.fetched_at) }}</span>
+        <div v-for="c in summary.clients" :key="c.name" class="client small">
+          <b>{{ c.name }}</b>
+          <template v-if="!c.ok"><span class="c-red">读取失败：{{ c.error }}</span></template>
+          <template v-else>
+            <span>{{ c.torrents }} 个种子 · 对上 {{ c.matched ?? 0 }} 个扫描到的文件</span>
+            <span v-if="c.torrents && !c.matched" class="c-orange">
+              一个文件也没对上，请检查路径映射。下载器里的文件路径示例：<span class="mono">{{ c.sample || '（无）' }}</span>，它应该位于扫描的下载目录内。
+            </span>
+          </template>
+        </div>
       </div>
     </div>
 
@@ -209,18 +216,18 @@ function clientError(name: string) {
         </label>
       </div>
       <div class="f">
-        <span class="label">路径映射 <span class="muted">（下载器里看到的路径 → 本工具中的路径）</span></span>
+        <span class="label">路径映射 <span class="muted">（左：下载器里的保存路径，如 /video；右：LinkScope 里的路径，如 /vol2/1000/video）</span></span>
         <div v-for="(m, i) in form.mappings" :key="i" class="map">
-          <NInput v-model:value="m.from" class="mono-input" placeholder="/downloads" :input-props="{ 'aria-label': '下载器中的路径' }" />
+          <NInput v-model:value="m.from" class="mono-input" placeholder="下载器里的路径，如 /video" :input-props="{ 'aria-label': '下载器中的路径' }" />
           <Icon name="arrow" />
-          <NInput v-model:value="m.to" class="mono-input" placeholder="/vol1/1000/Downloads" :input-props="{ 'aria-label': '本工具中的路径' }" />
+          <NInput v-model:value="m.to" class="mono-input" placeholder="LinkScope 里的路径，如 /vol2/1000/video" :input-props="{ 'aria-label': '本工具中的路径' }" />
           <NButton quaternary size="small" aria-label="删除这条映射" @click="form.mappings.splice(i, 1)">×</NButton>
         </div>
         <NButton dashed size="small" @click="form.mappings.push({ from: '', to: '' })">
           <template #icon><Icon name="plus" /></template>
           添加映射
         </NButton>
-        <span class="muted small">下载器也运行在 Docker 里时，它看到的保存路径（如 /downloads）通常和这里不同，需要映射后才能对上文件。路径一致则不用填。</span>
+        <span class="muted small">下载器也运行在 Docker 里时，它看到的保存路径（如 /downloads）通常和这里不同，需要映射后才能对上文件。路径一致则不用填。两边填反时会自动纠正。</span>
       </div>
     </div>
 
@@ -249,6 +256,11 @@ function clientError(name: string) {
 </template>
 
 <style scoped>
+.clients { display: flex; flex-direction: column; gap: 6px; }
+.client { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.client .mono { word-break: break-all; }
+.c-red { color: var(--red-ink); }
+.c-orange { color: var(--orange-ink); }
 .dl, .form { display: flex; flex-direction: column; gap: 12px; }
 .intro { margin: 0; line-height: 20px; }
 .small { font-size: 12px; }

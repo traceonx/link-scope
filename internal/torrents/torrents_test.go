@@ -178,3 +178,21 @@ func TestHelpers(t *testing.T) {
 		t.Errorf("mainDomain: %s", s)
 	}
 }
+
+func TestFixReversedMapping(t *testing.T) {
+	orig := pathExists
+	defer func() { pathExists = orig }()
+	pathExists = func(p string) bool { return strings.HasPrefix(p, "/vol2") }
+	d := Downloader{Mappings: []Mapping{{From: "/vol2/1000/video", To: "/video"}, {From: "/downloads", To: "/vol2/1000/dl"}}}
+	ms := fixMappings(d.Mappings)
+	d2 := Downloader{Mappings: ms}
+	if got := d2.mapPath("/video/download/a.mkv"); got != "/vol2/1000/video/download/a.mkv" {
+		t.Errorf("填反的映射未纠正：%s", got)
+	}
+	if got := d2.mapPath("/downloads/b.mkv"); got != "/vol2/1000/dl/b.mkv" {
+		t.Errorf("正确的映射被改动：%s", got)
+	}
+	if d.Mappings[0].From != "/vol2/1000/video" {
+		t.Error("不应修改原配置")
+	}
+}

@@ -98,6 +98,8 @@ type ClientStat struct {
 	OK       bool   `json:"ok"`
 	Error    string `json:"error,omitempty"`
 	Torrents int    `json:"torrents"`
+	Matched  int    `json:"matched"`          // 扫描结果中属于该下载器种子的文件数
+	Sample   string `json:"sample,omitempty"` // 一个种子文件路径示例（已映射），用于排查路径映射
 }
 
 type SiteStat struct {

@@ -48,7 +48,7 @@ export interface TorrentRef {
 
 export interface TorrentSummary {
   fetched_at: number
-  clients: { name: string; ok: boolean; error?: string; torrents: number }[]
+  clients: { name: string; ok: boolean; error?: string; torrents: number; matched?: number; sample?: string }[]
   sites: { site: string; files: number; size: number; seeding: number; unregistered: number }[]
   matched: number
   seeding: number

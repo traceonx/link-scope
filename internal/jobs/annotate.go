@@ -35,8 +35,17 @@ func annotate(r *scanner.Result, snap *torrents.Snapshot) {
 	byPath := map[string][]scanner.TorrentRef{}
 	dirSet := map[string]bool{}
 	ts := &scanner.TorrentSummary{FetchedAt: snap.FetchedAt, Clients: []scanner.ClientStat{}, Sites: []scanner.SiteStat{}}
+	clientIdx := map[string]int{}
 	for _, c := range snap.Clients {
-		ts.Clients = append(ts.Clients, scanner.ClientStat{Name: c.Name, OK: c.Error == "", Error: c.Error, Torrents: len(c.Torrents)})
+		cs := scanner.ClientStat{Name: c.Name, OK: c.Error == "", Error: c.Error, Torrents: len(c.Torrents)}
+		for _, t := range c.Torrents {
+			if len(t.Files) > 0 {
+				cs.Sample = t.Files[0]
+				break
+			}
+		}
+		clientIdx[c.Name] = len(ts.Clients)
+		ts.Clients = append(ts.Clients, cs)
 		for i, t := range c.Torrents {
 			ref := scanner.TorrentRef{Client: c.Name, Hash: t.Hash, Name: t.Name, Site: c.Sites[i], State: t.State,
 				Unregistered: t.Unregistered, Message: t.Message}
@@ -81,6 +90,13 @@ func annotate(r *scanner.Result, snap *torrents.Snapshot) {
 			continue
 		}
 		ts.Matched++
+		counted := map[string]bool{}
+		for _, ref := range it.Torrents {
+			if j, ok := clientIdx[ref.Client]; ok && !counted[ref.Client] {
+				counted[ref.Client] = true
+				ts.Clients[j].Matched++
+			}
+		}
 		it.Tags = append(it.Tags, "torrent")
 		seeding, unreg := false, false
 		itemSites := map[string]bool{}
