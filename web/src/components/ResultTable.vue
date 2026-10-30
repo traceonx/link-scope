@@ -191,6 +191,8 @@ function onSorter(s: DataTableSortState | DataTableSortState[] | null) {
     :row-class-name="rowClass"
     :checked-row-keys="checked"
     :scroll-x="showTorrents ? 1080 : 840"
+    table-layout="fixed"
+    :scrollbar-props="{ trigger: 'none' }"
     :bordered="false"
     size="small"
     @update:checked-row-keys="onChecked"
@@ -200,7 +202,7 @@ function onSorter(s: DataTableSortState | DataTableSortState[] | null) {
 
 <style scoped>
 :deep(.cell-badges) { display: flex; flex-wrap: wrap; gap: 4px; }
-:deep(.cell-file) { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+:deep(.cell-file) { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow: hidden; }
 :deep(.cell-name) { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :deep(.cell-dir) { font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :deep(.cell-nlink) { font-weight: 600; color: var(--ink-2); }

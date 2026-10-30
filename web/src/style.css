@@ -82,7 +82,7 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); }
-html { overflow-x: hidden; }
+
 .mono { font-family: var(--mono); }
 .muted { color: var(--ink-2); }
 .icon { flex-shrink: 0; }
