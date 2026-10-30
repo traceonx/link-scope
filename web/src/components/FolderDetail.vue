@@ -165,7 +165,7 @@ const rel = (it: Item) => it.path.slice(props.folder.path.length + 1) || it.name
 .files li + li { border-top: 1px solid var(--border); }
 .file { width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .file:hover { background: var(--soft); }
-.file:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.file:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .file-name { font-size: 13px; word-break: break-all; }
 .file-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .spacer { flex: 1; }

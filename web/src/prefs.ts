@@ -29,6 +29,10 @@ export function stored<T>(key: string, fallback: T): Ref<T> {
 export const viewPref = stored<ViewMode>('ls.view2', 'folders')
 export const presetsPref = stored<ScanPreset[]>('ls.presets', [])
 
+/** 扫描表单草稿：未扫描就刷新页面时恢复填写的目录（saved_at 为毫秒时间戳） */
+export type ScanDraft = Omit<ScanPreset, 'name'> & { saved_at: number }
+export const scanDraftPref = stored<ScanDraft | null>('ls.scanDraft', null)
+
 // 主题单独以纯字符串保存，index.html 中的脚本在首屏前读取它
 function readTheme(): ThemeMode {
   try {

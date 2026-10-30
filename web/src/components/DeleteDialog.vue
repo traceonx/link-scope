@@ -214,8 +214,8 @@ function close() {
 .path { flex: 1 1 260px; min-width: 0; font-size: 12px; word-break: break-all; }
 .meta { font-size: 12px; color: var(--ink-2); }
 .row.bad .path { color: var(--ink-2); text-decoration: line-through; }
-.more { width: 100%; padding: 8px; border: 0; background: transparent; color: var(--blue); font: inherit; font-size: 13px; cursor: pointer; }
-.more:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.more { width: 100%; padding: 8px; border: 0; background: transparent; color: var(--primary-ink); font: inherit; font-size: 13px; cursor: pointer; }
+.more:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .more-note { padding: 8px 12px; }
 .mode { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; }
 .mode-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 260px; }

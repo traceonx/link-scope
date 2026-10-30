@@ -175,7 +175,7 @@ async function copyPath() {
 .c-red { color: var(--red-ink); }
 .advanced { border: 1px solid var(--border); border-radius: 8px; }
 .advanced summary { padding: 10px 12px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--ink-2); }
-.advanced summary:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.advanced summary:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .adv-body { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px; }
 dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
 dt { color: var(--ink-2); }

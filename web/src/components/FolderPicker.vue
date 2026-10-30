@@ -123,7 +123,7 @@ function choose() {
   font: inherit; font-size: 14px; text-align: left; cursor: pointer;
 }
 .picker-item:hover { background: var(--soft); }
-.picker-item:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.picker-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .picker-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-foot { display: flex; justify-content: flex-end; gap: 8px; }
 </style>
