@@ -90,7 +90,7 @@ const emptyText = computed(() => {
       </NEmpty>
     </section>
 
-    <section v-if="summary" class="card results" :class="{ 'has-bulk': checked.length }" aria-label="清理结果">
+    <section v-if="summary" class="card results" aria-label="清理结果">
       <div class="r-head">
         <NRadioGroup v-model:value="view" aria-label="显示方式">
           <NRadioButton value="folders">
@@ -136,6 +136,14 @@ const emptyText = computed(() => {
         </NTab>
       </NTabs>
 
+      <BulkBar
+        v-if="canDelete"
+        :count="checked.length"
+        :size="checkedTotal"
+        :unit="view === 'folders' ? '个文件夹' : '项'"
+        @clear="clearChecked"
+        @delete="deleteChecked"
+      />
       <div v-if="view === 'files' && dirFilter" class="strip">
         <Icon name="folder" />
         <span>当前仅显示文件夹 <b>{{ dirLabel }}</b> 中的文件</span>
@@ -159,7 +167,7 @@ const emptyText = computed(() => {
       </div>
 
       <FolderTable
-        v-if="view === 'folders'"
+        v-if="view === 'folders' && (loading || count)"
         :checked="checked"
         :selectable="canDelete"
         :show-torrents="hasTorrents"
@@ -178,7 +186,7 @@ const emptyText = computed(() => {
         @sort="onFolderSort"
       />
       <ResultTable
-        v-else
+        v-else-if="view === 'files' && (loading || count)"
         :checked="checked"
         :selectable="canDelete"
         :show-torrents="hasTorrents"
@@ -212,15 +220,6 @@ const emptyText = computed(() => {
       </div>
     </section>
 
-    <BulkBar
-      v-if="canDelete"
-      :count="checked.length"
-      :size="checkedTotal"
-      :unit="view === 'folders' ? '个文件夹' : '项'"
-      @clear="clearChecked"
-      @delete="deleteChecked"
-    />
-
     <DetailDrawer
       :folder="openFolder"
       :item="openItem"
@@ -238,7 +237,18 @@ const emptyText = computed(() => {
 <style scoped>
 .c-red { color: var(--red-ink); }
 .empty-card { padding: 56px 16px; }
-.results { overflow: hidden; }
+.results { overflow: hidden; display: flex; flex-direction: column; }
+/* 桌面端：卡片占满一屏，只有表格内部滚动，页面本身不出现滚动条 */
+@media (min-width: 641px) {
+  .page { height: calc(100dvh - 112px); min-height: 520px; }
+  .results { flex: 1; min-height: 0; }
+}
+.results :deep(.ls-table) { flex: 1; min-height: 0; }
+.results :deep(.ls-table .n-data-table-th:first-child),
+.results :deep(.ls-table .n-data-table-td:first-child) { padding-left: 20px; }
+.results :deep(.ls-table .n-data-table-th:last-child),
+.results :deep(.ls-table .n-data-table-td:last-child) { padding-right: 20px; }
+.results :deep(.ls-table .n-data-table__pagination) { margin: 0; padding: 12px 20px; border-top: 1px solid var(--border); }
 .r-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; padding: 18px 20px 8px; }
 .rb { display: inline-flex; align-items: center; gap: 6px; }
 .search { width: 260px; max-width: 100%; }
@@ -248,12 +258,16 @@ const emptyText = computed(() => {
 .tab-count { margin-left: 6px; padding: 0 6px; border-radius: 9px; background: var(--chip); color: var(--ink-2); font-size: 12px; line-height: 18px; }
 .tabs :deep(.n-tabs-tab--active) .tab-count { background: var(--primary-bg); color: var(--primary-ink); }
 .strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--soft); font-size: 13px; }
-.empty { padding: 40px 16px 48px; }
+.empty { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 16px 48px; }
 .empty-actions { display: flex; gap: 8px; justify-content: center; }
 @media (max-width: 640px) {
   .r-head { padding: 14px 14px 6px; }
   .tabs { padding: 0 8px; }
   .strip { padding: 8px 14px; }
+  .results :deep(.ls-table) { height: 70vh; flex: none; }
+  .results :deep(.ls-table .n-data-table-th:first-child),
+  .results :deep(.ls-table .n-data-table-td:first-child) { padding-left: 14px; }
+  .results :deep(.ls-table .n-data-table__pagination) { padding: 10px 14px; }
   .search, .site-select { width: 100%; }
 }
 </style>

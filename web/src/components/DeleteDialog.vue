@@ -4,6 +4,7 @@ import { NButton, NCheckbox, NModal, NSpin, useDialog } from 'naive-ui'
 import Icon from './Icon.vue'
 import { api } from '../api'
 import { fmtCount, fmtSize } from '../format'
+import { downloaderCount } from '../store'
 import type { DeletePreview, DeleteResult, DeleteTarget } from '../types'
 
 const props = defineProps<{ show: boolean; target: DeleteTarget | null; title?: string }>()
@@ -14,6 +15,8 @@ const loading = ref(false)
 const deleting = ref(false)
 const error = ref('')
 const permanent = ref(false)
+// 同时从下载器删除种子（默认勾选；仅在已连接下载器时显示）
+const removeTorrents = ref(true)
 const expanded = ref(false)
 const result = ref<DeleteResult | null>(null)
 
@@ -24,6 +27,7 @@ watch(
     preview.value = null
     error.value = ''
     permanent.value = false
+    removeTorrents.value = true
     expanded.value = false
     result.value = null
     loading.value = true
@@ -47,6 +51,8 @@ const skipped = computed(() => pv.value?.items.filter((x) => x.error) ?? [])
 const kindLabel = { file: '文件', dir: '文件夹', symlink: '软链接', '': '' } as const
 
 const dialog = useDialog()
+const showTorrentOpt = computed(() => downloaderCount.value > 0)
+const tr = computed(() => result.value?.torrents ?? null)
 
 function confirmRun() {
   if (!canConfirm.value) return
@@ -70,7 +76,7 @@ async function run() {
   if (!props.target || !canConfirm.value) return
   deleting.value = true
   try {
-    result.value = await api.deletePaths(props.target, permanent.value)
+    result.value = await api.deletePaths(props.target, permanent.value, showTorrentOpt.value && removeTorrents.value)
     emit('done', result.value)
   } catch (e) {
     error.value = (e as Error).message
@@ -112,8 +118,15 @@ function close() {
           <span class="mono">{{ e.path }}</span>：{{ e.error }}
         </span>
       </div>
+      <div v-if="tr" class="notice col" :class="tr.errors.length ? 'notice-warn' : 'notice-seed'">
+        <b>已从下载器删除 {{ tr.removed.length }} 个种子</b>
+        <span v-for="t in tr.removed.slice(0, 5)" :key="t.client + t.name" class="small">{{ t.client }}：{{ t.name }}</span>
+        <span v-if="tr.removed.length > 5" class="small">等 {{ tr.removed.length }} 个</span>
+        <span v-if="tr.partial" class="small">{{ tr.partial }} 个种子只删除了部分文件，已保留在下载器中。</span>
+        <span v-for="e in tr.errors" :key="e" class="small">删除种子失败：{{ e }}</span>
+      </div>
       <div v-if="!permanent && result.deleted" class="muted small">
-        已移入回收站，可以在右上角「回收站」中恢复；{{ preview?.trash_days }} 天后自动清除。
+        已移入回收站，可以在左侧「回收站」中恢复；{{ preview?.trash_days }} 天后自动清除。
       </div>
       <div class="muted small">统计数字已按删除结果估算，建议稍后重新扫描。</div>
     </div>
@@ -175,6 +188,17 @@ function close() {
               </span>
             </div>
             <NCheckbox v-model:checked="permanent">彻底删除</NCheckbox>
+          </div>
+
+          <div v-if="showTorrentOpt" class="mode">
+            <div class="mode-text">
+              <b>同时删除下载器中的种子</b>
+              <span class="muted small">
+                <template v-if="preview!.torrents">涉及约 {{ fmtCount(preview!.torrents) }} 个种子。</template>
+                只删除文件已全部清理的种子（不会让下载器再删文件），只删了一部分文件的种子会保留。<template v-if="!permanent">从回收站恢复后需要重新添加种子。</template>
+              </span>
+            </div>
+            <NCheckbox v-model:checked="removeTorrents">删除种子</NCheckbox>
           </div>
         </template>
       </div>
