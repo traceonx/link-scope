@@ -10,6 +10,7 @@ import type {
   FolderPage,
   Filter,
   JobState,
+  LogEntry,
   ResultPage,
   ScanRequest,
   Summary,
@@ -83,5 +84,6 @@ export const api = {
   testDownloader: (d: Downloader) =>
     request<{ torrents: number }>('api/downloaders/test', { method: 'POST', body: JSON.stringify(d) }),
   deleteDownloader: (id: string) => request<{ ok: boolean }>(`api/downloaders/${id}`, { method: 'DELETE' }),
+  logs: (after = 0) => request<{ items: LogEntry[]; last: number }>(`api/logs?after=${after}`),
   refreshTorrents: () => request<TorrentSummary>('api/torrents/refresh', { method: 'POST' }),
 }

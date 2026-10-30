@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/traceonx/link-scope/internal/logs"
 )
 
 // Store 保存下载器配置（DATA_DIR/downloaders.json），并负责读取所有下载器的种子。
@@ -212,6 +215,9 @@ func (s *Store) Fetch(ctx context.Context) Snapshot {
 			}
 			if err != nil {
 				r.Error = fmt.Sprint(err)
+				logs.Warnf("[下载器] %s 读取失败：%v", d.Name, err)
+			} else {
+				log.Printf("[下载器] %s：读取到 %d 个种子", d.Name, len(r.Torrents))
 			}
 			for _, t := range r.Torrents {
 				r.Sites = append(r.Sites, siteOf(t.Trackers))
@@ -273,6 +279,7 @@ func (s *Store) RemoveByPaths(ctx context.Context, deleted []string) RemoveResul
 		go func(d Downloader) {
 			defer wg.Done()
 			fail := func(err error) {
+				logs.Warnf("[下载器] %s 删除种子失败：%v", d.Name, err)
 				mu.Lock()
 				res.Errors = append(res.Errors, fmt.Sprintf("%s：%v", d.Name, err))
 				mu.Unlock()
@@ -317,6 +324,12 @@ func (s *Store) RemoveByPaths(ctx context.Context, deleted []string) RemoveResul
 					fail(err)
 					removed = nil
 				}
+			}
+			for _, t := range removed {
+				log.Printf("[下载器] %s：已删除种子 %s（文件已清理）", d.Name, t.Name)
+			}
+			if partial > 0 {
+				log.Printf("[下载器] %s：%d 个种子只删除了部分文件，已保留", d.Name, partial)
 			}
 			mu.Lock()
 			res.Removed = append(res.Removed, removed...)

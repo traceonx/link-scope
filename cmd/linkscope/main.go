@@ -15,6 +15,7 @@ import (
 	"github.com/traceonx/link-scope/internal/config"
 	"github.com/traceonx/link-scope/internal/fileops"
 	"github.com/traceonx/link-scope/internal/jobs"
+	"github.com/traceonx/link-scope/internal/logs"
 	"github.com/traceonx/link-scope/internal/server"
 	"github.com/traceonx/link-scope/internal/torrents"
 	"github.com/traceonx/link-scope/internal/update"
@@ -29,6 +30,7 @@ func main() {
 		fmt.Println(version.Version)
 		return
 	}
+	logs.Install()
 	log.Println(version.Banner())
 
 	cfg := config.Load()

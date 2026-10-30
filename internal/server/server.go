@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path"
@@ -19,6 +20,7 @@ import (
 	"github.com/traceonx/link-scope/internal/config"
 	"github.com/traceonx/link-scope/internal/fileops"
 	"github.com/traceonx/link-scope/internal/jobs"
+	"github.com/traceonx/link-scope/internal/logs"
 	"github.com/traceonx/link-scope/internal/scanner"
 	"github.com/traceonx/link-scope/internal/torrents"
 	"github.com/traceonx/link-scope/internal/update"
@@ -64,6 +66,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/downloaders/test", s.downloaderTest)
 	mux.HandleFunc("DELETE /api/downloaders/{id}", s.downloaderDelete)
 	mux.HandleFunc("POST /api/torrents/refresh", s.torrentsRefresh)
+	mux.HandleFunc("GET /api/logs", s.logList)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
 	mux.Handle("/", s.spa())
 	return s.auth(mux)
@@ -676,6 +679,7 @@ func (s *Server) downloaderSave(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
+	log.Printf("[下载器] 已保存「%s」（%s，%s）", saved.Name, saved.Type, map[bool]string{true: "启用", false: "停用"}[saved.Enabled])
 	writeJSON(w, 200, saved)
 }
 
@@ -698,6 +702,7 @@ func (s *Server) downloaderDelete(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, err.Error())
 		return
 	}
+	log.Printf("[下载器] 已删除一个下载器配置")
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -787,4 +792,11 @@ func (s *Server) foldersCSV(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	cw.Flush()
+}
+
+// logList 返回内存中的最近日志；after 为上次拿到的最大 ID，用于增量轮询。
+func (s *Server) logList(w http.ResponseWriter, r *http.Request) {
+	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	items, last := logs.Default.Since(after, logs.Capacity)
+	writeJSON(w, 200, map[string]any{"items": items, "last": last})
 }

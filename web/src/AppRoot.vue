@@ -9,6 +9,7 @@ import ResultsView from './views/ResultsView.vue'
 import DownloadersView from './views/DownloadersView.vue'
 import TrashView from './views/TrashView.vue'
 import SettingsView from './views/SettingsView.vue'
+import LogsView from './views/LogsView.vue'
 import { route } from './router'
 import { bindMessage, del, init, onDeleted } from './store'
 
@@ -21,6 +22,7 @@ const views = {
   results: ResultsView,
   downloaders: DownloadersView,
   trash: TrashView,
+  logs: LogsView,
   settings: SettingsView,
 }
 const current = computed(() => views[route.value.page])

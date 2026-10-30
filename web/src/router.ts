@@ -1,7 +1,7 @@
 // 极简 hash 路由（#/results、#/settings/update），不引入 vue-router
 import { computed, ref } from 'vue'
 
-export type PageKey = 'dashboard' | 'scan' | 'results' | 'downloaders' | 'trash' | 'settings'
+export type PageKey = 'dashboard' | 'scan' | 'results' | 'downloaders' | 'trash' | 'logs' | 'settings'
 
 export interface PageMeta {
   key: PageKey
@@ -16,6 +16,7 @@ export const pages: PageMeta[] = [
   { key: 'results', title: '清理结果', icon: 'results', group: '清理' },
   { key: 'downloaders', title: '下载器', icon: 'downloader', group: '管理' },
   { key: 'trash', title: '回收站', icon: 'trash', group: '管理' },
+  { key: 'logs', title: '日志', icon: 'logs', group: '系统' },
   { key: 'settings', title: '设置', icon: 'settings', group: '系统' },
 ]
 
