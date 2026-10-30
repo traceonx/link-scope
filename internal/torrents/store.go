@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/traceonx/link-scope/internal/logs"
 )
 
 // Store 保存下载器配置（DATA_DIR/downloaders.json），并负责读取所有下载器的种子。
@@ -212,6 +215,9 @@ func (s *Store) Fetch(ctx context.Context) Snapshot {
 			}
 			if err != nil {
 				r.Error = fmt.Sprint(err)
+				logs.Warnf("[下载器] %s 读取失败：%v", d.Name, err)
+			} else {
+				log.Printf("[下载器] %s：读取到 %d 个种子", d.Name, len(r.Torrents))
 			}
 			for _, t := range r.Torrents {
 				r.Sites = append(r.Sites, siteOf(t.Trackers))
@@ -221,4 +227,116 @@ func (s *Store) Fetch(ctx context.Context) Snapshot {
 	}
 	wg.Wait()
 	return snap
+}
+
+// RemovedTorrent 是一个已从下载器移除的种子。
+type RemovedTorrent struct {
+	Client string `json:"client"`
+	Name   string `json:"name"`
+}
+
+// RemoveResult 是 RemoveByPaths 的结果。
+type RemoveResult struct {
+	Removed []RemovedTorrent `json:"removed"`
+	Partial int              `json:"partial"` // 只删了部分文件、因此保留的种子数
+	Errors  []string         `json:"errors"`
+}
+
+func underAny(p string, dirs []string) bool {
+	for _, d := range dirs {
+		d = strings.TrimRight(d, "/")
+		if p == d || strings.HasPrefix(p, d+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// RemoveByPaths 从所有启用的下载器中移除文件已被删除的种子（不删除文件）。
+// 只有种子的全部文件都在 deleted 中（或已不存在）时才移除；只删了一部分的种子保留，避免误停仍在用的种子。
+func (s *Store) RemoveByPaths(ctx context.Context, deleted []string) RemoveResult {
+	res := RemoveResult{Removed: []RemovedTorrent{}, Errors: []string{}}
+	if len(deleted) == 0 {
+		return res
+	}
+	clean := make([]string, len(deleted))
+	for i, p := range deleted {
+		clean[i] = filepath.Clean(p)
+	}
+	s.mu.Lock()
+	var list []Downloader
+	for _, d := range s.list {
+		if d.Enabled {
+			list = append(list, d)
+		}
+	}
+	s.mu.Unlock()
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for i := range list {
+		wg.Add(1)
+		go func(d Downloader) {
+			defer wg.Done()
+			fail := func(err error) {
+				logs.Warnf("[下载器] %s 删除种子失败：%v", d.Name, err)
+				mu.Lock()
+				res.Errors = append(res.Errors, fmt.Sprintf("%s：%v", d.Name, err))
+				mu.Unlock()
+			}
+			c, err := newClient(&d)
+			if err != nil {
+				fail(err)
+				return
+			}
+			cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			defer cancel()
+			ts, err := c.torrents(cctx)
+			if err != nil {
+				fail(err)
+				return
+			}
+			var hashes []string
+			var removed []RemovedTorrent
+			partial := 0
+			for _, t := range ts {
+				hit, all := false, true
+				for _, f := range t.Files {
+					f = filepath.Clean(f)
+					if underAny(f, clean) {
+						hit = true
+					} else if pathExists(f) {
+						all = false
+					}
+				}
+				if !hit {
+					continue
+				}
+				if !all {
+					partial++
+					continue
+				}
+				hashes = append(hashes, t.Hash)
+				removed = append(removed, RemovedTorrent{Client: d.Name, Name: t.Name})
+			}
+			if len(hashes) > 0 {
+				if err := c.remove(cctx, hashes); err != nil {
+					fail(err)
+					removed = nil
+				}
+			}
+			for _, t := range removed {
+				log.Printf("[下载器] %s：已删除种子 %s（文件已清理）", d.Name, t.Name)
+			}
+			if partial > 0 {
+				log.Printf("[下载器] %s：%d 个种子只删除了部分文件，已保留", d.Name, partial)
+			}
+			mu.Lock()
+			res.Removed = append(res.Removed, removed...)
+			res.Partial += partial
+			mu.Unlock()
+		}(list[i])
+	}
+	wg.Wait()
+	return res
 }

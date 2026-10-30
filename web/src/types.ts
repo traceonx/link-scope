@@ -233,6 +233,14 @@ export interface ScanPreset {
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 
+export interface LogEntry {
+  id: number
+  /** 毫秒时间戳 */
+  time: number
+  level: 'INFO' | 'WARN' | 'ERROR'
+  msg: string
+}
+
 export interface DeletePreviewItem {
   path: string
   kind: 'file' | 'dir' | 'symlink' | ''
@@ -257,6 +265,8 @@ export interface DeletePreview {
     errors: number
   }
   seeding: { files: number; sites: string[] }
+  /** 涉及的种子数（按上次扫描的标注） */
+  torrents: number
   trash_days: number
 }
 
@@ -264,6 +274,8 @@ export interface DeleteResult {
   deleted: number
   failed: number
   errors: { path: string; error?: string }[]
+  /** 勾选「同时删除种子」时返回 */
+  torrents?: { removed: { client: string; name: string }[]; partial: number; errors: string[] } | null
 }
 
 export interface TrashEntry {

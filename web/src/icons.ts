@@ -44,6 +44,10 @@ import {
   mdiWeatherSunny,
   mdiBookmarkOutline,
   mdiFolderMultipleOutline,
+  mdiTextBoxOutline,
+  mdiPause,
+  mdiArrowCollapseDown,
+  mdiNotificationClearAll,
 } from '@mdi/js'
 
 export const iconPaths = {
@@ -88,6 +92,10 @@ export const iconPaths = {
   tune: mdiTuneVariant,
   update: mdiUpdate,
   preset: mdiBookmarkOutline,
+  logs: mdiTextBoxOutline,
+  pause: mdiPause,
+  toBottom: mdiArrowCollapseDown,
+  clear: mdiNotificationClearAll,
   light: mdiWeatherSunny,
   dark: mdiWeatherNight,
   system: mdiThemeLightDark,

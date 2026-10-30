@@ -9,6 +9,9 @@ import (
 	"testing"
 )
 
+// qbDeleted 记录模拟 qBittorrent 收到的删除请求
+var qbDeleted []string
+
 func fakeQbit(t *testing.T) *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v2/auth/login", func(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +47,14 @@ func fakeQbit(t *testing.T) *httptest.Server {
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "Show.S01/e01.mkv"}, {"name": "Show.S01/e02.mkv"}})
 		}
 	}))
+	mux.HandleFunc("POST /api/v2/torrents/delete", auth(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.Form.Get("deleteFiles") != "false" {
+			w.WriteHeader(400)
+			return
+		}
+		qbDeleted = append(qbDeleted, strings.Split(r.Form.Get("hashes"), "|")...)
+	}))
 	mux.HandleFunc("/api/v2/torrents/trackers", auth(func(w http.ResponseWriter, r *http.Request) {
 		trs := []map[string]any{{"url": "** [DHT] **", "status": 2, "msg": ""}}
 		if r.URL.Query().Get("hash") == "h2" {
@@ -56,6 +67,9 @@ func fakeQbit(t *testing.T) *httptest.Server {
 	return ts
 }
 
+// trRemoved 记录模拟 Transmission 收到的移除请求（仅不删数据的）
+var trRemoved []string
+
 func fakeTransmission(t *testing.T) *httptest.Server {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Transmission-Session-Id") != "sess" {
@@ -65,6 +79,21 @@ func fakeTransmission(t *testing.T) *httptest.Server {
 		}
 		if u, p, _ := r.BasicAuth(); u != "tr" || p != "pw" {
 			w.WriteHeader(401)
+			return
+		}
+		var body struct {
+			Method    string `json:"method"`
+			Arguments struct {
+				IDs        []string `json:"ids"`
+				DeleteData bool     `json:"delete-local-data"`
+			} `json:"arguments"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Method == "torrent-remove" {
+			if !body.Arguments.DeleteData {
+				trRemoved = append(trRemoved, body.Arguments.IDs...)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": "success"})
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -194,5 +223,40 @@ func TestFixReversedMapping(t *testing.T) {
 	}
 	if d.Mappings[0].From != "/vol2/1000/video" {
 		t.Error("不应修改原配置")
+	}
+}
+
+func TestRemoveByPaths(t *testing.T) {
+	qb, tr := fakeQbit(t), fakeTransmission(t)
+	qbDeleted, trRemoved = nil, nil
+	// 未被删除的文件都视为仍存在
+	old := pathExists
+	pathExists = func(string) bool { return true }
+	t.Cleanup(func() { pathExists = old })
+
+	s := &Store{list: []Downloader{
+		{Name: "qb", Type: "qbittorrent", URL: qb.URL, Username: "admin", Password: "pw", Enabled: true,
+			Mappings: []Mapping{{From: "/downloads", To: "/vol1/dl"}}},
+		{Name: "tr", Type: "transmission", URL: tr.URL, Username: "tr", Password: "pw", Enabled: true,
+			Mappings: []Mapping{{From: "/data", To: "/vol2/media"}}},
+	}}
+	// 删除电影整个文件夹（h1 全部文件）+ 剧集的一集（h2 只删一部分），专辑未动
+	res := s.RemoveByPaths(context.Background(), []string{"/vol1/dl/movies/Movie.2024", "/vol1/dl/tv/Show.S01/e01.mkv"})
+	if len(res.Errors) != 0 {
+		t.Fatalf("不应出错: %v", res.Errors)
+	}
+	if len(res.Removed) != 1 || res.Removed[0].Name != "Movie.2024" || res.Partial != 1 {
+		t.Errorf("结果错误: %+v", res)
+	}
+	if len(qbDeleted) != 1 || qbDeleted[0] != "h1" || len(trRemoved) != 0 {
+		t.Errorf("下载器收到的删除请求错误: qb=%v tr=%v", qbDeleted, trRemoved)
+	}
+
+	// 剩下的一集也删除后（e01 已不存在），h2 被移除；Transmission 的专辑整体删除
+	pathExists = func(p string) bool { return p != "/vol1/dl/tv/Show.S01/e01.mkv" }
+	qbDeleted = nil
+	res = s.RemoveByPaths(context.Background(), []string{"/vol1/dl/tv/Show.S01/e02.mkv", "/vol2/media/music/Album"})
+	if len(res.Removed) != 2 || res.Partial != 0 || len(qbDeleted) != 1 || qbDeleted[0] != "h2" || len(trRemoved) != 1 || trRemoved[0] != "t1" {
+		t.Errorf("第二次结果错误: %+v qb=%v tr=%v", res, qbDeleted, trRemoved)
 	}
 }

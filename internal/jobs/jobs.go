@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/traceonx/link-scope/internal/logs"
 	"github.com/traceonx/link-scope/internal/scanner"
 	"github.com/traceonx/link-scope/internal/torrents"
 )
@@ -113,6 +115,7 @@ func (m *Manager) Start(o scanner.Options) error {
 		m.state.Phase, m.state.Done, m.state.Total = phase, done, total
 		m.mu.Unlock()
 	}
+	log.Printf("[扫描] 开始扫描 %s（媒体库目录 %d 个）", o.Source, len(o.Targets))
 	go func() {
 		r, err := scanner.Scan(ctx, o)
 		if err == nil && m.fetcher != nil && m.fetcher.HasAny() {
@@ -130,11 +133,21 @@ func (m *Manager) Start(o scanner.Options) error {
 		switch {
 		case errors.Is(err, context.Canceled):
 			m.state = State{Status: "cancelled"}
+			log.Printf("[扫描] 已取消")
 		case err != nil:
 			m.state = State{Status: "error", Error: err.Error()}
+			logs.Errorf("[扫描] 失败：%v", err)
 		default:
 			m.setResult(r)
 			m.state = State{Status: "done"}
+			sm := r.Summary
+			log.Printf("[扫描] 完成：%d 个文件，已整理 %d，待清理 %d，重复副本 %d，用时 %v 秒", sm.Total, sm.Linked, sm.Unlinked, sm.DupFiles, sm.Duration)
+			for _, w := range sm.Warnings {
+				logs.Warnf("[扫描] %s", w)
+			}
+			if sm.ErrorCount > 0 {
+				logs.Warnf("[扫描] %d 个路径无法读取（通常是权限不足）", sm.ErrorCount)
+			}
 		}
 		cancel()
 	}()

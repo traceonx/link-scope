@@ -165,7 +165,11 @@ func (m *Manager) Capability() (bool, string) {
 
 func (m *Manager) logf(format string, args ...any) {
 	line := time.Now().Format("2006-01-02 15:04:05 ") + fmt.Sprintf(format, args...)
-	log.Print("[删除] " + line[20:])
+	prefix := "[删除] "
+	if strings.Contains(format, "失败") {
+		prefix = "[WARN] [删除] "
+	}
+	log.Print(prefix + line[20:])
 	_ = os.MkdirAll(m.dataDir, 0o755)
 	if f, err := os.OpenFile(filepath.Join(m.dataDir, "delete.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
 		_, _ = f.WriteString(line + "\n")

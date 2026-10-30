@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path"
@@ -19,6 +20,7 @@ import (
 	"github.com/traceonx/link-scope/internal/config"
 	"github.com/traceonx/link-scope/internal/fileops"
 	"github.com/traceonx/link-scope/internal/jobs"
+	"github.com/traceonx/link-scope/internal/logs"
 	"github.com/traceonx/link-scope/internal/scanner"
 	"github.com/traceonx/link-scope/internal/torrents"
 	"github.com/traceonx/link-scope/internal/update"
@@ -64,6 +66,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/downloaders/test", s.downloaderTest)
 	mux.HandleFunc("DELETE /api/downloaders/{id}", s.downloaderDelete)
 	mux.HandleFunc("POST /api/torrents/refresh", s.torrentsRefresh)
+	mux.HandleFunc("GET /api/logs", s.logList)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
 	mux.Handle("/", s.spa())
 	return s.auth(mux)
@@ -499,6 +502,8 @@ type deleteRequest struct {
 	Dir       string   `json:"dir"`
 	View      string   `json:"view"` // folders：按文件夹视图的筛选结果删除整个文件夹
 	Permanent bool     `json:"permanent"`
+	// RemoveTorrents 删除成功后，同时从下载器移除文件已全部删除的种子
+	RemoveTorrents bool `json:"remove_torrents"`
 }
 
 func (s *Server) deleteTargets(w http.ResponseWriter, r *http.Request) ([]string, *deleteRequest, bool) {
@@ -565,6 +570,17 @@ func (s *Server) seeding(paths []string) seedingInfo {
 	return info
 }
 
+// torrentCount 返回待删除内容涉及的种子数（按上次扫描的标注，仅用于预览提示）。
+func (s *Server) torrentCount(paths []string) int {
+	seen := map[string]bool{}
+	for _, it := range s.jobs.ItemsByPath(paths) {
+		for _, t := range it.Torrents {
+			seen[t.Client+"/"+t.Hash] = true
+		}
+	}
+	return len(seen)
+}
+
 func (s *Server) deletePreview(w http.ResponseWriter, r *http.Request) {
 	paths, _, ok := s.deleteTargets(w, r)
 	if !ok {
@@ -575,7 +591,8 @@ func (s *Server) deletePreview(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"preview": pv, "seeding": s.seeding(paths), "trash_days": s.ops.TrashDays()})
+	writeJSON(w, 200, map[string]any{"preview": pv, "seeding": s.seeding(paths), "torrents": s.torrentCount(paths),
+		"trash_days": s.ops.TrashDays()})
 }
 
 func (s *Server) deletePaths(w http.ResponseWriter, r *http.Request) {
@@ -593,6 +610,11 @@ func (s *Server) deletePaths(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.jobs.RemovePaths(done)
+	var removed *torrents.RemoveResult
+	if req.RemoveTorrents && len(done) > 0 && s.dl.HasAny() {
+		res := s.dl.RemoveByPaths(r.Context(), done)
+		removed = &res
+	}
 	failed := 0
 	var errs []fileops.Result
 	for _, x := range results {
@@ -606,7 +628,7 @@ func (s *Server) deletePaths(w http.ResponseWriter, r *http.Request) {
 	if errs == nil {
 		errs = []fileops.Result{}
 	}
-	writeJSON(w, 200, map[string]any{"deleted": len(done), "failed": failed, "errors": errs})
+	writeJSON(w, 200, map[string]any{"deleted": len(done), "failed": failed, "errors": errs, "torrents": removed})
 }
 
 func (s *Server) trashList(w http.ResponseWriter, _ *http.Request) {
@@ -657,6 +679,7 @@ func (s *Server) downloaderSave(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
+	log.Printf("[下载器] 已保存「%s」（%s，%s）", saved.Name, saved.Type, map[bool]string{true: "启用", false: "停用"}[saved.Enabled])
 	writeJSON(w, 200, saved)
 }
 
@@ -679,6 +702,7 @@ func (s *Server) downloaderDelete(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, err.Error())
 		return
 	}
+	log.Printf("[下载器] 已删除一个下载器配置")
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -768,4 +792,11 @@ func (s *Server) foldersCSV(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	cw.Flush()
+}
+
+// logList 返回内存中的最近日志；after 为上次拿到的最大 ID，用于增量轮询。
+func (s *Server) logList(w http.ResponseWriter, r *http.Request) {
+	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	items, last := logs.Default.Since(after, logs.Capacity)
+	writeJSON(w, 200, map[string]any{"items": items, "last": last})
 }

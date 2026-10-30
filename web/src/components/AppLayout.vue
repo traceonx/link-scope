@@ -117,13 +117,6 @@ const scanPct = computed(() => {
           </a>
         </template>
       </nav>
-      <div v-if="cfg" class="nav-foot">
-        <a href="#/settings/update" class="ver" :title="`提交 ${cfg.version.commit}`">
-          <Icon name="update" :size="16" />
-          <span class="nav-text">v{{ cfg.version.version }}</span>
-          <span v-if="hasUpdate" class="nav-text badge badge-primary">可更新</span>
-        </a>
-      </div>
     </aside>
     <div v-if="mobile && drawerOpen" class="scrim" @click="drawerOpen = false" />
 
@@ -235,13 +228,6 @@ const scanPct = computed(() => {
 .rail .nav-head { padding: 0; justify-content: center; }
 .nav-dot { position: absolute; top: 9px; right: 12px; width: 8px; height: 8px; border-radius: 50%; background: var(--orange); }
 
-.nav-foot { padding: 12px 16px 16px; flex-shrink: 0; }
-.ver {
-  display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px;
-  color: var(--ink-2); text-decoration: none; font-size: 13px; white-space: nowrap;
-}
-.ver:hover { background: var(--chip); }
-.rail .ver { justify-content: center; }
 
 /* ---- 内容区 ---- */
 .content { margin-left: var(--nav-w); min-width: 0; transition: margin-left 0.2s ease; }
@@ -265,7 +251,7 @@ const scanPct = computed(() => {
   background: var(--surface); box-shadow: var(--shadow); color: var(--ink-2); font-size: 12px; text-decoration: none; white-space: nowrap;
 }
 .ver-chip:hover { color: var(--primary-ink); }
-.ver-chip:focus-visible, .scan-chip:focus-visible, .ver:focus-visible, .brand:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.ver-chip:focus-visible, .scan-chip:focus-visible, .brand:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .dot { position: absolute; top: -2px; right: -2px; width: 10px; height: 10px; border-radius: 50%; background: var(--orange); border: 2px solid var(--surface); }
 .main { max-width: 1440px; margin: 0 auto; padding: 8px 24px 40px; }
 

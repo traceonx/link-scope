@@ -51,6 +51,8 @@ type Torrent struct {
 
 type client interface {
 	torrents(ctx context.Context) ([]Torrent, error)
+	// remove 从下载器中移除种子，不删除文件（文件已由本工具删除或移入回收站）。须在 torrents 之后调用。
+	remove(ctx context.Context, hashes []string) error
 }
 
 var httpClient = &http.Client{Timeout: 60 * time.Second}
@@ -243,6 +245,22 @@ func (q *qbit) torrents(ctx context.Context) ([]Torrent, error) {
 	return out, nil
 }
 
+func (q *qbit) remove(ctx context.Context, hashes []string) error {
+	form := url.Values{"hashes": {strings.Join(hashes, "|")}, "deleteFiles": {"false"}}
+	req, _ := http.NewRequestWithContext(ctx, "POST", q.base()+"/api/v2/torrents/delete", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Referer", q.base())
+	resp, err := q.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("删除种子返回 HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // ---- Transmission（RPC） ----
 
 type transmission struct {
@@ -362,6 +380,23 @@ func (t *transmission) torrents(ctx context.Context) ([]Torrent, error) {
 		out = append(out, tr)
 	}
 	return out, nil
+}
+
+func (t *transmission) remove(ctx context.Context, hashes []string) error {
+	var resp struct {
+		Result string `json:"result"`
+	}
+	err := t.call(ctx, map[string]any{
+		"method":    "torrent-remove",
+		"arguments": map[string]any{"ids": hashes, "delete-local-data": false},
+	}, &resp)
+	if err != nil {
+		return err
+	}
+	if resp.Result != "success" {
+		return fmt.Errorf("RPC 错误：%s", resp.Result)
+	}
+	return nil
 }
 
 var unregisteredWords = []string{

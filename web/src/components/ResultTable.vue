@@ -46,7 +46,7 @@ function relDir(dir: string) {
 
 const columns = computed<DataTableColumns<Item>>(() => {
   const cols: DataTableColumns<Item> = []
-  if (props.selectable) cols.push({ type: 'selection', width: 44 })
+  if (props.selectable) cols.push({ type: 'selection', width: 56 })
   cols.push(
     {
       title: '状态',
@@ -127,7 +127,7 @@ const columns = computed<DataTableColumns<Item>>(() => {
     {
       title: '',
       key: 'actions',
-      width: 72,
+      width: 88,
       render: (it) =>
         h(
           NButton,
@@ -192,6 +192,8 @@ function onSorter(s: DataTableSortState | DataTableSortState[] | null) {
     :checked-row-keys="checked"
     :scroll-x="showTorrents ? 1080 : 840"
     table-layout="fixed"
+    flex-height
+    class="ls-table"
     :scrollbar-props="{ trigger: 'none' }"
     :bordered="false"
     size="small"

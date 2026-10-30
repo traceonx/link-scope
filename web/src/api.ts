@@ -10,6 +10,7 @@ import type {
   FolderPage,
   Filter,
   JobState,
+  LogEntry,
   ResultPage,
   ScanRequest,
   Summary,
@@ -64,8 +65,11 @@ export const api = {
 
   deletePreview: (t: DeleteTarget) =>
     request<DeletePreview>('api/delete/preview', { method: 'POST', body: JSON.stringify(t) }),
-  deletePaths: (t: DeleteTarget, permanent: boolean) =>
-    request<DeleteResult>('api/delete', { method: 'POST', body: JSON.stringify({ ...t, permanent }) }),
+  deletePaths: (t: DeleteTarget, permanent: boolean, removeTorrents = false) =>
+    request<DeleteResult>('api/delete', {
+      method: 'POST',
+      body: JSON.stringify({ ...t, permanent, remove_torrents: removeTorrents }),
+    }),
   trash: () => request<{ items: TrashEntry[]; days: number }>('api/trash'),
   trashRestore: (ids: string[]) =>
     request<{ restored: number; results: { path: string; ok: boolean; error?: string }[] }>('api/trash/restore', {
@@ -80,5 +84,6 @@ export const api = {
   testDownloader: (d: Downloader) =>
     request<{ torrents: number }>('api/downloaders/test', { method: 'POST', body: JSON.stringify(d) }),
   deleteDownloader: (id: string) => request<{ ok: boolean }>(`api/downloaders/${id}`, { method: 'DELETE' }),
+  logs: (after = 0) => request<{ items: LogEntry[]; last: number }>(`api/logs?after=${after}`),
   refreshTorrents: () => request<TorrentSummary>('api/torrents/refresh', { method: 'POST' }),
 }
